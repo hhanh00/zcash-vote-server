@@ -1,6 +1,6 @@
 use anyhow::{Result, Error};
 use rocket::{routes, Config, State};
-use zcash_vote_server::{context::Context, db::{create_schema, store_election}, election::scan_data_dir};
+use zcash_vote_server::{context::Context, db::{create_schema, store_election}, election::scan_data_dir, routes::get_election};
 
 #[rocket::get("/")]
 fn index(context: &State<Context>) -> Result<String, String> {
@@ -41,5 +41,5 @@ fn launch() -> _ {
 
     rocket::custom(config)
         .manage(context)
-        .mount("/", routes![index])
+        .mount("/", routes![index, get_election])
 }

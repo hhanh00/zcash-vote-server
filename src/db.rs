@@ -15,7 +15,9 @@ pub fn create_schema(connection: &Connection) -> Result<()> {
 pub fn store_election(connection: &Connection, election: &Election) -> Result<()> {
     connection.execute(
         "INSERT INTO elections(id, definition)
-        VALUES (?1, ?2)",
+        VALUES (?1, ?2)
+        ON CONFLICT DO UPDATE SET
+        definition = excluded.definition",
         params![election.id, serde_json::to_string(&election)?])?;
     Ok(())
 }
