@@ -3,3 +3,6 @@ address = "0.0.0.0"
 
 [default.limits]
 bytes = "64 kB"
+
+[default.custom]
+db_path = "vote.db"
