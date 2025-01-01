@@ -1,6 +1,6 @@
 use anyhow::{Result, Error};
 use rocket::{routes, Config, State};
-use zcash_vote_server::{context::Context, db::create_schema};
+use zcash_vote_server::{context::Context, db::{create_schema, store_election}, election::scan_data_dir};
 
 #[rocket::get("/")]
 fn index(context: &State<Context>) -> Result<String, String> {
@@ -23,10 +23,21 @@ fn launch() -> _ {
     let config = Config::figment();
 
     // Extract custom values
-    let db_path: String = config.extract_inner("custom.db_path").expect("db_path");
-    let context = Context::new(db_path);
-    let connection = context.pool.get().unwrap();
-    create_schema(&connection).unwrap();
+    let init = || {
+        let data_path: String = config.extract_inner("custom.data_path")?;
+        let db_path: String = config.extract_inner("custom.db_path")?;
+        let context = Context::new(data_path, db_path);
+        let elections = scan_data_dir(&context.data_path)?;
+        tracing::info!("# elections = {}", elections.len());
+        let connection = context.pool.get()?;
+        create_schema(&connection)?;
+        for e in elections.iter() {
+            store_election(&connection, e)?;
+        }
+
+        Ok::<_, Error>(context)
+    };
+    let context = init().unwrap();
 
     rocket::custom(config)
         .manage(context)
