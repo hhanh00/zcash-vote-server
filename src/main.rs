@@ -1,5 +1,6 @@
 use anyhow::{Result, Error};
-use rocket::{routes, Config, State};
+use rocket::{routes, Build, Config, Rocket, State};
+use zcash_vote::download::download_reference_data;
 use zcash_vote_server::{context::Context, db::{create_schema, store_election}, election::scan_data_dir, routes::{get_election_by_id, post_ballot}};
 
 #[rocket::get("/")]
@@ -12,8 +13,7 @@ fn index(context: &State<Context>) -> Result<String, String> {
     r().map_err(|e| e.to_string())
 }
 
-#[rocket::launch]
-fn launch() -> _ {
+async fn rocket_build() -> Rocket<Build> {
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
         .compact()
@@ -23,7 +23,7 @@ fn launch() -> _ {
     let config = Config::figment();
 
     // Extract custom values
-    let init = || {
+    let init = async {
         let data_path: String = config.extract_inner("custom.data_path")?;
         let db_path: String = config.extract_inner("custom.db_path")?;
         let context = Context::new(data_path, db_path);
@@ -32,14 +32,21 @@ fn launch() -> _ {
         let connection = context.pool.get()?;
         create_schema(&connection)?;
         for e in elections.iter() {
+            let connection = context.pool.get()?;
             store_election(&connection, e)?;
+            download_reference_data(connection, e, None, "https://zec.rocks", |_| {}).await?;
         }
 
         Ok::<_, Error>(context)
     };
-    let context = init().unwrap();
+    let context = init.await.unwrap();
 
     rocket::custom(config)
         .manage(context)
         .mount("/", routes![index, get_election_by_id, post_ballot])
+}
+
+#[rocket::main]
+pub async fn main() {
+    rocket_build().await.launch().await.unwrap();
 }
