@@ -34,7 +34,6 @@ async fn rocket_build() -> Rocket<Build> {
         for e in elections.iter() {
             let connection = context.pool.get()?;
             store_election(&connection, e)?;
-            download_reference_data(connection, e, None, "https://zec.rocks", |_| {}).await?;
         }
 
         Ok::<_, Error>(context)

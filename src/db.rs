@@ -12,13 +12,6 @@ pub fn create_schema(connection: &Connection) -> Result<()> {
             definition TEXT NOT NULL)", [])?;
 
     connection.execute(
-        "CREATE TABLE IF NOT EXISTS ballots(
-            id_ballot INTEGER PRIMARY KEY,
-            election INTEGER NOT NULL,
-            hash BLOB NOT NULL,
-            ballot TEXT NOT NULL)", [])?;
-
-    connection.execute(
         "CREATE TABLE IF NOT EXISTS cmx_roots(
             id_cmx_root INTEGER PRIMARY KEY,
             election INTEGER NOT NULL,
@@ -49,9 +42,10 @@ pub fn store_election(connection: &Connection, election: &Election) -> Result<()
     Ok(())
 }
 
-pub fn store_cmx(connection: &Connection, cmx: &[u8]) -> Result<()> {
+pub fn store_cmx(connection: &Connection, id_election: u32, cmx: &[u8]) -> Result<()> {
     connection.execute(
-        "INSERT INTO cmxs(hash) VALUES (?1)", [cmx])?;
+        "INSERT INTO cmxs(election, hash) VALUES (?1, ?2)", 
+        params![id_election, cmx])?;
     Ok(())
 }
 
@@ -59,7 +53,7 @@ pub fn store_ballot(connection: &Connection, id_election: u32, ballot: &Ballot, 
     let hash = ballot.data.sighash()?;
     connection.execute(
         "INSERT INTO ballots
-        (election, hash, ballot)
+        (election, hash, data)
         VALUES (?1, ?2, ?3)", params![id_election, &hash, serde_json::to_string(ballot)?])?;
     let id_ballot = connection.last_insert_rowid() as u32;
 
