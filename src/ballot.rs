@@ -7,4 +7,3 @@ pub fn compute_new_cmx_root(old_frontier: &mut Frontier, ballot: &Ballot) -> Res
     }
     Ok(())
 }
-
