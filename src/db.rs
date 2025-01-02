@@ -58,12 +58,12 @@ pub fn check_cmx_root(connection: &Connection, id_election: u32, cmx: &[u8]) -> 
     r.ok_or(anyhow::anyhow!("Invalid cmx root"))
 }
 
-pub fn store_ballot(connection: &Connection, id_election: u32, ballot: &Ballot, cmx_root: &[u8]) -> Result<u32> {
+pub fn store_ballot(connection: &Connection, id_election: u32, height: u32, ballot: &Ballot, cmx_root: &[u8]) -> Result<u32> {
     let hash = ballot.data.sighash()?;
     connection.execute(
         "INSERT INTO ballots
-        (election, hash, data)
-        VALUES (?1, ?2, ?3)", params![id_election, &hash, serde_json::to_string(ballot)?])?;
+        (election, height, hash, data)
+        VALUES (?1, ?2, ?3, ?4)", params![id_election, height, &hash, serde_json::to_string(ballot)?])?;
     let id_ballot = connection.last_insert_rowid() as u32;
 
     store_cmx_root(connection, id_election, id_ballot, cmx_root)?;
@@ -76,5 +76,19 @@ pub fn store_cmx_root(connection: &Connection, id_election: u32, height: u32, cm
         (election, height, hash)
         VALUES (?1, ?2, ?3)", params![id_election, height, cmx_root])?;
     Ok(())
+}
+
+pub fn get_ballot_height(connection: &Connection, id_election: u32, height: u32) -> Result<String> {
+    let e = connection.query_row(
+        "SELECT data FROM ballots WHERE election = ?1 AND height = ?2",
+        params![id_election, height], |r| r.get::<_, String>(0))?;
+    Ok(e)
+}
+
+pub fn get_num_ballots(connection: &Connection, id_election: u32) -> Result<u32> {
+    let n = connection.query_row(
+        "SELECT COUNT(*) FROM ballots WHERE election = ?1",
+        [id_election], |r| r.get::<_, u32>(0))?;
+    Ok(n)
 }
 
