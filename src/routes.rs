@@ -44,7 +44,7 @@ pub fn post_ballot(id: String, ballot: Json<Ballot>, state: &State<Context>) -> 
         let mut cmx_frontier = cmx_frontier.unwrap_or(election.cmx_frontier.unwrap());
         for action in ballot.data.actions.iter() {
             cmx_frontier.append(OrchardHash(as_byte256(&action.cmx)));
-            store_cmx(&transaction, &action.cmx)?;
+            store_cmx(&transaction, id_election, &action.cmx)?;
         }
         let cmx_root = cmx_frontier.root();
         println!("cmx_root  {}", hex::encode(&cmx_root));
@@ -53,7 +53,7 @@ pub fn post_ballot(id: String, ballot: Json<Ballot>, state: &State<Context>) -> 
             "cmx_frontier",
             &serde_json::to_string(&cmx_frontier).unwrap(),
         )?;
-        // store_ballot(&transaction, id_election, &ballot, &cmx_root)?;
+        store_ballot(&transaction, id_election, &ballot, &cmx_root)?;
         transaction.commit()?;
         Ok::<_, Error>(())
     };
