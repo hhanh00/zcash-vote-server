@@ -2,7 +2,7 @@ use anyhow::{Result, Error};
 use rocket::{routes, Build, Config, Rocket, State};
 use rocket_cors::CorsOptions;
 use zcash_vote::download::download_reference_data;
-use zcash_vote_server::{context::Context, db::{create_schema, store_cmx, store_cmx_root, store_election}, election::scan_data_dir, routes::{get_election_by_id, post_ballot}};
+use zcash_vote_server::{context::Context, db::{create_schema, store_cmx, store_cmx_root, store_election}, election::scan_data_dir, routes::{get_ballot_height, get_election_by_id, get_num_ballots, post_ballot}};
 
 #[rocket::get("/")]
 fn index(context: &State<Context>) -> Result<String, String> {
@@ -49,7 +49,8 @@ async fn rocket_build() -> Rocket<Build> {
     rocket::custom(config)
         .attach(cors)
         .manage(context)
-        .mount("/", routes![index, get_election_by_id, post_ballot])
+        .mount("/", routes![index, get_election_by_id, post_ballot,
+        get_num_ballots, get_ballot_height])
 }
 
 #[rocket::main]

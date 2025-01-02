@@ -17,7 +17,7 @@ rocket = { version = "0.5.1", features = ["json"] }
 rocket_cors = "0.6.0"
 lazy_static = "1.5.0"
 
-zcash-vote = {git = "https://github.com/hhanh00/zcash-vote.git", rev="3d192e1"}
+zcash-vote = {git = "https://github.com/hhanh00/zcash-vote.git", rev="ca7da82"}
 orchard = "0.3.0"
 
 [patch.crates-io]
