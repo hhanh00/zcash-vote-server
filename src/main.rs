@@ -1,7 +1,8 @@
 use anyhow::{Result, Error};
 use rocket::{routes, Build, Config, Rocket, State};
+use rocket_cors::CorsOptions;
 use zcash_vote::download::download_reference_data;
-use zcash_vote_server::{context::Context, db::{create_schema, store_election}, election::scan_data_dir, routes::{get_election_by_id, post_ballot}};
+use zcash_vote_server::{context::Context, db::{create_schema, store_cmx, store_cmx_root, store_election}, election::scan_data_dir, routes::{get_election_by_id, post_ballot}};
 
 #[rocket::get("/")]
 fn index(context: &State<Context>) -> Result<String, String> {
@@ -33,14 +34,20 @@ async fn rocket_build() -> Rocket<Build> {
         create_schema(&connection)?;
         for e in elections.iter() {
             let connection = context.pool.get()?;
-            store_election(&connection, e)?;
+            let id_election = store_election(&connection, e)?;
+            store_cmx_root(&connection, id_election, 0, &e.cmx.0)?;
         }
 
         Ok::<_, Error>(context)
     };
     let context = init.await.unwrap();
 
+    let cors = CorsOptions::default()
+    .to_cors()
+    .unwrap();
+
     rocket::custom(config)
+        .attach(cors)
         .manage(context)
         .mount("/", routes![index, get_election_by_id, post_ballot])
 }
