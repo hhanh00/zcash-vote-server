@@ -2,14 +2,10 @@ use anyhow::Error;
 use rocket::{serde::json::Json, State};
 use serde_json::Value;
 use zcash_vote::{
-    as_byte256,
-    ballot::Ballot,
-    db::{load_prop, store_prop},
-    election::{Frontier, OrchardHash},
-    Election,
+    as_byte256, ballot::Ballot, db::{load_prop, store_prop}, election::{Frontier, OrchardHash}, Election
 };
 
-use crate::{context::Context, db::{get_election, store_ballot}};
+use crate::{context::Context, db::{get_election, store_ballot, store_cmx}};
 
 #[rocket::get("/election/<id>")]
 pub fn get_election_by_id(id: String, state: &State<Context>) -> Result<Json<Value>, String> {
@@ -48,14 +44,16 @@ pub fn post_ballot(id: String, ballot: Json<Ballot>, state: &State<Context>) -> 
         let mut cmx_frontier = cmx_frontier.unwrap_or(election.cmx_frontier.unwrap());
         for action in ballot.data.actions.iter() {
             cmx_frontier.append(OrchardHash(as_byte256(&action.cmx)));
+            store_cmx(&transaction, &action.cmx)?;
         }
         let cmx_root = cmx_frontier.root();
+        println!("cmx_root  {}", hex::encode(&cmx_root));
         store_prop(
             &transaction,
             "cmx_frontier",
             &serde_json::to_string(&cmx_frontier).unwrap(),
         )?;
-        store_ballot(&transaction, id_election, &ballot, &cmx_root)?;
+        // store_ballot(&transaction, id_election, &ballot, &cmx_root)?;
         transaction.commit()?;
         Ok::<_, Error>(())
     };

@@ -3,11 +3,7 @@ use rusqlite::{params, Connection};
 use zcash_vote::{ballot::Ballot, Election};
 
 pub fn create_schema(connection: &Connection) -> Result<()> {
-    connection.execute(
-        "CREATE TABLE IF NOT EXISTS properties(
-            id_property INTEGER PRIMARY KEY,
-            name TEXT NOT NULL UNIQUE,
-            value TEXT NOT NULL)", [])?;
+    zcash_vote::db::create_schema(connection)?;
 
     connection.execute(
         "CREATE TABLE IF NOT EXISTS elections(
@@ -50,6 +46,12 @@ pub fn store_election(connection: &Connection, election: &Election) -> Result<()
         ON CONFLICT DO UPDATE SET
         definition = excluded.definition",
         params![election.id, serde_json::to_string(&election)?])?;
+    Ok(())
+}
+
+pub fn store_cmx(connection: &Connection, cmx: &[u8]) -> Result<()> {
+    connection.execute(
+        "INSERT INTO cmxs(hash) VALUES (?1)", [cmx])?;
     Ok(())
 }
 
