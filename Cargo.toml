@@ -17,7 +17,7 @@ rocket = { version = "0.5.1", features = ["json"] }
 rocket_cors = "0.6.0"
 lazy_static = "1.5.0"
 
-zcash-vote = {git = "https://github.com/hhanh00/zcash-vote.git", rev="b7b554d"}
+zcash-vote = {git = "https://github.com/hhanh00/zcash-vote.git", rev="09da95f"}
 orchard = "0.3.0"
 
 [patch.crates-io]
@@ -25,5 +25,5 @@ orchard = {git = "https://github.com/hhanh00/orchard.git", rev="e7abba7"}
 halo2_gadgets  = { git = "https://github.com/zcash/halo2.git", rev = "642924d614305d882cc122739c59144109f4bd3f" }
 halo2_proofs = { git = "https://github.com/zcash/halo2.git", rev = "642924d614305d882cc122739c59144109f4bd3f" }
 
-[patch."https://github.com/hhanh00/zcash-vote.git"]
-zcash-vote = {path = "../zwallet/native/zcash-vote"}
+#[patch."https://github.com/hhanh00/zcash-vote.git"]
+#zcash-vote = {path = "../zwallet/native/zcash-vote"}
