@@ -1,7 +1,7 @@
 use anyhow::{Result, Error};
 use rocket::{routes, Build, Config, Rocket, State};
 use rocket_cors::CorsOptions;
-use zcash_vote::db::store_cmx_root;
+use rusqlite::params;
 use zcash_vote_server::{context::Context, db::{create_schema, store_election}, election::scan_data_dir, routes::{get_ballot_height, get_election_by_id, get_num_ballots, post_ballot}};
 
 #[rocket::get("/")]
@@ -35,7 +35,12 @@ async fn rocket_build() -> Rocket<Build> {
         for e in elections.iter() {
             let connection = context.pool.get()?;
             let id_election = store_election(&connection, e)?;
-            store_cmx_root(&connection, id_election, 0, &e.cmx.0)?;
+            let cmx_root = e.cmx_frontier.as_ref().unwrap().root();
+            let frontier = serde_json::to_string(&e.cmx_frontier)?;
+            connection.execute("INSERT INTO cmx_frontiers(election, height, frontier)
+            VALUES (?1, 0, ?2) ON CONFLICT DO NOTHING", params![id_election, &frontier])?;
+            connection.execute("INSERT INTO cmx_roots(election, height, hash)
+            VALUES (?1, 0, ?2) ON CONFLICT DO NOTHING", params![id_election, &cmx_root])?;
         }
 
         Ok::<_, Error>(context)
