@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::Result;
-use zcash_vote::Election;
+use zcash_vote::election::Election;
 
 pub fn scan_data_dir(data_dir: &str) -> Result<Vec<Election>> {
     let mut elections = vec![];
@@ -13,7 +13,9 @@ pub fn scan_data_dir(data_dir: &str) -> Result<Vec<Election>> {
         if let Ok(entry) = entry {
             let p = entry.path();
             if p.is_file() {
-                if let Ok(election) = serde_json::from_reader::<_, Election>(BufReader::new(File::open(&p)?)) {
+                if let Ok(election) =
+                    serde_json::from_reader::<_, Election>(BufReader::new(File::open(&p)?))
+                {
                     elections.push(election);
                 }
             }

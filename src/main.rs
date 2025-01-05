@@ -1,8 +1,13 @@
-use anyhow::{Result, Error};
+use anyhow::{Error, Result};
 use rocket::{routes, Build, Config, Rocket, State};
 use rocket_cors::CorsOptions;
 use rusqlite::params;
-use zcash_vote_server::{context::Context, db::{create_schema, store_election}, election::scan_data_dir, routes::{get_ballot_height, get_election_by_id, get_num_ballots, post_ballot}};
+use zcash_vote_server::{
+    context::Context,
+    db::{create_schema, store_election},
+    election::scan_data_dir,
+    routes::{get_ballot_height, get_election_by_id, get_num_ballots, post_ballot},
+};
 
 #[rocket::get("/")]
 fn index(context: &State<Context>) -> Result<String, String> {
@@ -37,25 +42,34 @@ async fn rocket_build() -> Rocket<Build> {
             let id_election = store_election(&connection, e)?;
             let cmx_root = e.cmx_frontier.as_ref().unwrap().root();
             let frontier = serde_json::to_string(&e.cmx_frontier)?;
-            connection.execute("INSERT INTO cmx_frontiers(election, height, frontier)
-            VALUES (?1, 0, ?2) ON CONFLICT DO NOTHING", params![id_election, &frontier])?;
-            connection.execute("INSERT INTO cmx_roots(election, height, hash)
-            VALUES (?1, 0, ?2) ON CONFLICT DO NOTHING", params![id_election, &cmx_root])?;
+            connection.execute(
+                "INSERT INTO cmx_frontiers(election, height, frontier)
+            VALUES (?1, 0, ?2) ON CONFLICT DO NOTHING",
+                params![id_election, &frontier],
+            )?;
+            connection.execute(
+                "INSERT INTO cmx_roots(election, height, hash)
+            VALUES (?1, 0, ?2) ON CONFLICT DO NOTHING",
+                params![id_election, &cmx_root],
+            )?;
         }
 
         Ok::<_, Error>(context)
     };
     let context = init.await.unwrap();
 
-    let cors = CorsOptions::default()
-    .to_cors()
-    .unwrap();
+    let cors = CorsOptions::default().to_cors().unwrap();
 
-    rocket::custom(config)
-        .attach(cors)
-        .manage(context)
-        .mount("/", routes![index, get_election_by_id, post_ballot,
-        get_num_ballots, get_ballot_height])
+    rocket::custom(config).attach(cors).manage(context).mount(
+        "/",
+        routes![
+            index,
+            get_election_by_id,
+            post_ballot,
+            get_num_ballots,
+            get_ballot_height
+        ],
+    )
 }
 
 #[rocket::main]
