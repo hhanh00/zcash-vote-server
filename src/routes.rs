@@ -18,7 +18,7 @@ use crate::{
 pub fn get_election_by_id(id: String, state: &State<Context>) -> Result<Json<Value>, String> {
     (|| {
         let connection = state.pool.get()?;
-        let (_, election) = get_election(&connection, &id)?;
+        let (_, election, _) = get_election(&connection, &id)?;
         let election = serde_json::from_str::<Value>(&election)?;
         Ok::<_, Error>(Json(election))
     })()
@@ -33,7 +33,7 @@ pub fn get_ballot_height(
 ) -> Result<Json<Value>, Custom<String>> {
     (|| {
         let connection = state.pool.get()?;
-        let (id_election, _) = get_election(&connection, &id)?;
+        let (id_election, _, _) = get_election(&connection, &id)?;
         let ballot = crate::db::get_ballot_height(&connection, id_election, height)?;
         let ballot = serde_json::from_str::<Value>(&ballot)?;
         Ok::<_, Error>(Json(ballot))
@@ -45,7 +45,7 @@ pub fn get_ballot_height(
 pub fn get_num_ballots(id: String, state: &State<Context>) -> Result<String, Custom<String>> {
     (|| {
         let connection = state.pool.get()?;
-        let (id_election, _) = get_election(&connection, &id)?;
+        let (id_election, _, _) = get_election(&connection, &id)?;
         let n = crate::db::get_num_ballots(&connection, id_election)?;
         Ok::<_, Error>(n.to_string())
     })()
@@ -62,7 +62,10 @@ pub fn post_ballot(
         println!("Ballot received");
         let pool = &state.pool;
         let mut connection = pool.get()?;
-        let (id_election, election) = get_election(&connection, &id)?;
+        let (id_election, election, closed) = get_election(&connection, &id)?;
+        if closed {
+            anyhow::bail!("Election is closed");
+        }
         let election = serde_json::from_str::<Election>(&election)?;
         let data = zcash_vote::validate::validate_ballot(
             ballot.clone().into_inner(),
