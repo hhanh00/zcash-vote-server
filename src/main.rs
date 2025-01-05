@@ -37,9 +37,10 @@ async fn rocket_build() -> Rocket<Build> {
         tracing::info!("# elections = {}", elections.len());
         let connection = context.pool.get()?;
         create_schema(&connection)?;
+        connection.execute("UPDATE elections SET closed = TRUE", [])?;
         for e in elections.iter() {
             let connection = context.pool.get()?;
-            let id_election = store_election(&connection, e)?;
+            let id_election = store_election(&connection, e, false)?;
             let cmx_root = e.cmx_frontier.as_ref().unwrap().root();
             let frontier = serde_json::to_string(&e.cmx_frontier)?;
             connection.execute(

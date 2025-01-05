@@ -9,34 +9,37 @@ pub fn create_schema(connection: &Connection) -> Result<()> {
         "CREATE TABLE IF NOT EXISTS elections(
             id_election INTEGER PRIMARY KEY,
             id TEXT NOT NULL UNIQUE,
-            definition TEXT NOT NULL)",
+            definition TEXT NOT NULL,
+            closed BOOLEAN NOT NULL)",
         [],
     )?;
 
     Ok(())
 }
 
-pub fn get_election(connection: &Connection, id: &str) -> Result<(u32, String)> {
+pub fn get_election(connection: &Connection, id: &str) -> Result<(u32, String, bool)> {
     let res = connection.query_row(
-        "SELECT id_election, definition FROM elections WHERE id = ?1",
+        "SELECT id_election, definition, closed FROM elections WHERE id = ?1",
         [id],
         |r| {
             let id_election = r.get::<_, u32>(0)?;
             let election = r.get::<_, String>(1)?;
-            Ok((id_election, election))
+            let closed = r.get::<_, bool>(2)?;
+            Ok((id_election, election, closed))
         },
     )?;
     Ok(res)
 }
 
-pub fn store_election(connection: &Connection, election: &Election) -> Result<u32> {
+pub fn store_election(connection: &Connection, election: &Election, closed: bool) -> Result<u32> {
     let id_election = connection.query_row(
-        "INSERT INTO elections(id, definition)
-        VALUES (?1, ?2)
+        "INSERT INTO elections(id, definition, closed)
+        VALUES (?1, ?2, ?3)
         ON CONFLICT DO UPDATE SET
-        definition = excluded.definition
+        definition = excluded.definition,
+        closed = excluded.closed
         RETURNING id_election",
-        params![election.id, serde_json::to_string(&election)?],
+        params![election.id, serde_json::to_string(&election)?, closed],
         |r| r.get::<_, u32>(0),
     )?;
     Ok(id_election)
