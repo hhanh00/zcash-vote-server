@@ -1,12 +1,12 @@
 use anyhow::Error;
+use orchard::vote::{Ballot, Frontier, OrchardHash};
 use rocket::{http::Status, response::status::Custom, serde::json::Json, State};
 use rusqlite::params;
 use serde_json::Value;
 use zcash_vote::{
     as_byte256,
-    ballot::Ballot,
     db::store_dnf,
-    election::{Election, Frontier, OrchardHash},
+    election::{Election, BALLOT_VK},
 };
 
 use crate::{
@@ -67,9 +67,10 @@ pub fn post_ballot(
             anyhow::bail!("Election is closed");
         }
         let election = serde_json::from_str::<Election>(&election)?;
-        let data = zcash_vote::validate::validate_ballot(
+        let data = orchard::vote::validate_ballot(
             ballot.clone().into_inner(),
             election.signature_required,
+            &BALLOT_VK,
         )?;
         println!("Validated");
 

@@ -1,6 +1,7 @@
 use anyhow::Result;
+use orchard::vote::Ballot;
 use rusqlite::{params, Connection, OptionalExtension};
-use zcash_vote::{ballot::Ballot, db::store_cmx_root, election::Election};
+use zcash_vote::{db::store_cmx_root, election::Election};
 
 pub fn create_schema(connection: &Connection) -> Result<()> {
     zcash_vote::db::create_schema(connection)?;
