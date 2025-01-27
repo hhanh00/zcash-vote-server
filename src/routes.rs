@@ -75,7 +75,7 @@ pub fn post_ballot(
         println!("Validated");
 
         let transaction = connection.transaction()?;
-        if &data.anchors.nf != &election.nf.0 {
+        if data.anchors.nf != election.nf.0 {
             anyhow::bail!("Incorrect nullifier root");
         }
         check_cmx_root(&transaction, id_election, &data.anchors.cmx)?;
@@ -95,7 +95,7 @@ pub fn post_ballot(
             store_dnf(&transaction, id_election, &action.nf)?;
         }
         let cmx_root = cmx_frontier.root();
-        println!("cmx_root  {}", hex::encode(&cmx_root));
+        println!("cmx_root  {}", hex::encode(cmx_root));
         let cmx_frontier = serde_json::to_string(&cmx_frontier)?;
         transaction.execute(
             "INSERT INTO cmx_frontiers(election, height, frontier)
