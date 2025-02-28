@@ -24,7 +24,8 @@ fn index(context: &State<Context>) -> Result<String, String> {
 pub fn init_context(config: &Figment) -> Result<Context> {
     let data_path: String = config.extract_inner("custom.data_path")?;
     let db_path: String = config.extract_inner("custom.db_path")?;
-    let context = Context::new(data_path, db_path);
+    let cometbft_port: u16 = config.extract_inner("custom.cometbft_port")?;
+    let context = Context::new(data_path, db_path, cometbft_port);
     Ok(context)
 }
 
@@ -86,7 +87,7 @@ pub async fn main() {
 
     let (app, runner) = VoteChain::new(context.pool.get().unwrap());
     let server = ServerBuilder::new(1_000_000)
-        .bind(format!("{}:{}", "127.0.0.1", 26658), app)
+        .bind(format!("{}:{}", "127.0.0.1", context.comet_bft), app)
         .unwrap();
     std::thread::spawn(move || {
         let res = runner.run();

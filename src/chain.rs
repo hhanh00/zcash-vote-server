@@ -1,13 +1,7 @@
 use anyhow::Result;
 use blake2b_simd::Params;
 use rusqlite::params;
-use std::{
-    num::NonZero,
-    sync::{
-        mpsc::{channel, Receiver, Sender},
-        Arc, Mutex,
-    },
-};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use zcash_vote::{
     as_byte256,
     db::{load_prop, store_dnf, store_prop},
@@ -55,7 +49,7 @@ impl VoteChain {
 }
 
 impl Application for VoteChain {
-    fn info(&self, request: RequestInfo) -> ResponseInfo {
+    fn info(&self, _request: RequestInfo) -> ResponseInfo {
         let (tx_result, rx_result) = channel();
         self.cmd_tx
             .send(Command::Info(tx_result))

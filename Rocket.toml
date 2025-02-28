@@ -7,3 +7,4 @@ bytes = "64 kB"
 [default.custom]
 data_path = "data"
 db_path = "vote.db"
+cometbft_port = 26658

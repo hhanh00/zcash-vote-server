@@ -1,20 +1,14 @@
 use anyhow::Error;
-use orchard::vote::{Ballot, Frontier, OrchardHash};
+use orchard::vote::Ballot;
 use rocket::{http::Status, response::status::Custom, serde::json::Json, State};
-use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tendermint_abci::ClientBuilder;
 use tendermint_proto::abci::RequestFinalizeBlock;
-use zcash_vote::{
-    as_byte256,
-    db::store_dnf,
-    election::{Election, BALLOT_VK},
-};
 
 use crate::{
     context::Context,
-    db::{check_cmx_root, get_election, store_ballot},
+    db::get_election,
 };
 
 #[derive(Serialize, Deserialize)]
@@ -75,29 +69,13 @@ pub fn post_ballot(
     ballot: Json<Ballot>,
     state: &State<Context>,
 ) -> Result<String, Custom<String>> {
-    // TODO
-    // 1. create a client
-    // 2. client
-    //     .finalize_block(RequestFinalizeBlock {
-    //         txs: vec!["id,ballot".into()],
-    //         ..Default::default()
-    //     })
     let res = || {
-        // TODO
-        // make this an actor
-        // in check_tx
-        // check ballot validity except for double spend
-        // mark ballot at preflight-check
-        // insert into mempool
-        // in commit
-        // check preflight
-        // check unspent
-        // write to db
+        let comet_bft = state.comet_bft;
         println!("Ballot received");
         let tx = Tx { id, ballot: ballot.into_inner() };
         let tx_bytes = bincode::serialize(&tx).unwrap();
 
-        let mut bft_client = ClientBuilder::default().connect("127.0.0.1:26658").unwrap();
+        let mut bft_client = ClientBuilder::default().connect(format!("127.0.0.1:{}", comet_bft)).unwrap();
         bft_client.finalize_block(RequestFinalizeBlock {
             txs: vec![tx_bytes.into()],
             ..Default::default()
