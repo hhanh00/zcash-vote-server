@@ -4,7 +4,11 @@ use rocket_cors::CorsOptions;
 use rusqlite::params;
 use tendermint_abci::ServerBuilder;
 use zcash_vote_server::{
-    chain::VoteChain, context::Context, db::{create_schema, store_election}, election::scan_data_dir, routes::{get_ballot_height, get_election_by_id, get_num_ballots, post_ballot}
+    chain::VoteChain,
+    context::Context,
+    db::{create_schema, store_election},
+    election::scan_data_dir,
+    routes::{get_ballot_height, get_election_by_id, get_num_ballots, post_ballot},
 };
 
 #[rocket::get("/")]
@@ -29,7 +33,6 @@ async fn rocket_build(config: Figment, context: Context) -> Rocket<Build> {
         let elections = scan_data_dir(&context.data_path)?;
         tracing::info!("# elections = {}", elections.len());
         let connection = context.pool.get()?;
-        create_schema(&connection)?;
         connection.execute("UPDATE elections SET closed = TRUE", [])?;
         for e in elections.iter() {
             let connection = context.pool.get()?;
@@ -76,6 +79,10 @@ pub async fn main() {
 
     let config = Config::figment();
     let context = init_context(&config).unwrap();
+    {
+        let connection = context.pool.get().unwrap();
+        create_schema(&connection).unwrap();
+    }
 
     let (app, runner) = VoteChain::new(context.pool.get().unwrap());
     let server = ServerBuilder::new(1_000_000)

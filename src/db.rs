@@ -1,10 +1,26 @@
 use anyhow::Result;
+use blake2b_simd::Params;
 use orchard::vote::Ballot;
 use rusqlite::{params, Connection, OptionalExtension};
-use zcash_vote::{db::store_cmx_root, election::Election};
+use serde::{Deserialize, Serialize};
+use zcash_vote::{db::{store_cmx_root, store_prop}, election::Election};
+
+#[derive(Serialize, Deserialize)]
+pub struct AppState {
+    pub height: u32,
+    pub hash: String,
+}
 
 pub fn create_schema(connection: &Connection) -> Result<()> {
     zcash_vote::db::create_schema(connection)?;
+
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS properties(
+        id_property INTEGER PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        value TEXT NOT NULL)",
+        [],
+    )?;
 
     connection.execute(
         "CREATE TABLE IF NOT EXISTS elections(
@@ -14,6 +30,15 @@ pub fn create_schema(connection: &Connection) -> Result<()> {
             closed BOOLEAN NOT NULL)",
         [],
     )?;
+
+    let hash = Params::new().hash_length(32).personal(b"Zcash_Vote_CmBFT").to_state().finalize();
+    let hash = hex::encode(&hash.as_bytes());
+
+    let initial_state= AppState {
+        height: 0,
+        hash,
+    };
+    store_prop(connection, "state", &serde_json::to_string(&initial_state).unwrap())?;
 
     Ok(())
 }
