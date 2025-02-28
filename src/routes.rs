@@ -3,6 +3,8 @@ use orchard::vote::{Ballot, Frontier, OrchardHash};
 use rocket::{http::Status, response::status::Custom, serde::json::Json, State};
 use rusqlite::params;
 use serde_json::Value;
+use tendermint_abci::ClientBuilder;
+use tendermint_proto::abci::RequestFinalizeBlock;
 use zcash_vote::{
     as_byte256,
     db::store_dnf,
@@ -31,6 +33,13 @@ pub fn get_ballot_height(
     height: u32,
     state: &State<Context>,
 ) -> Result<Json<Value>, Custom<String>> {
+    // TODO: query block at height
+    // client.query(RequestQuery {
+    //         data: "test-key".into(),
+    //         path: "".to_string(),
+    //         height: 0,
+    //         prove: false,
+    //     })
     (|| {
         let connection = state.pool.get()?;
         let (id_election, _, _) = get_election(&connection, &id)?;
@@ -43,6 +52,7 @@ pub fn get_ballot_height(
 
 #[rocket::get("/election/<id>/num_ballots")]
 pub fn get_num_ballots(id: String, state: &State<Context>) -> Result<String, Custom<String>> {
+    // TODO: get current height
     (|| {
         let connection = state.pool.get()?;
         let (id_election, _, _) = get_election(&connection, &id)?;
@@ -58,8 +68,33 @@ pub fn post_ballot(
     ballot: Json<Ballot>,
     state: &State<Context>,
 ) -> Result<String, Custom<String>> {
+    // TODO
+    // 1. create a client
+    // 2. client
+    //     .finalize_block(RequestFinalizeBlock {
+    //         txs: vec!["id,ballot".into()],
+    //         ..Default::default()
+    //     })
     let res = || {
+        // TODO
+        // make this an actor
+        // in check_tx
+        // check ballot validity except for double spend
+        // mark ballot at preflight-check
+        // insert into mempool
+        // in commit
+        // check preflight
+        // check unspent
+        // write to db
         println!("Ballot received");
+        let ballot_hex = bincode::serialize(&ballot.0).unwrap();
+
+        let mut bft_client = ClientBuilder::default().connect("127.0.0.1:26658").unwrap();
+        bft_client.finalize_block(RequestFinalizeBlock {
+            txs: vec![ballot_hex.into()],
+            ..Default::default()
+        })?;
+
         let pool = &state.pool;
         let mut connection = pool.get()?;
         let (id_election, election, closed) = get_election(&connection, &id)?;
@@ -107,7 +142,7 @@ pub fn post_ballot(
         store_ballot(&transaction, id_election, height + 1, &ballot, &cmx_root)?;
         let sighash = hex::encode(data.sighash()?);
         println!("{id_election} {sighash}");
-        transaction.commit()?;
+        // transaction.commit()?;
         println!("Commited");
         Ok::<_, Error>(sighash)
     };

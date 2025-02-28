@@ -2,11 +2,9 @@ use anyhow::{Error, Result};
 use rocket::{routes, Build, Config, Rocket, State};
 use rocket_cors::CorsOptions;
 use rusqlite::params;
+use tendermint_abci::ServerBuilder;
 use zcash_vote_server::{
-    context::Context,
-    db::{create_schema, store_election},
-    election::scan_data_dir,
-    routes::{get_ballot_height, get_election_by_id, get_num_ballots, post_ballot},
+    chain::VoteChain, context::Context, db::{create_schema, store_election}, election::scan_data_dir, routes::{get_ballot_height, get_election_by_id, get_num_ballots, post_ballot}
 };
 
 #[rocket::get("/")]
@@ -75,5 +73,12 @@ async fn rocket_build() -> Rocket<Build> {
 
 #[rocket::main]
 pub async fn main() {
+    let app = VoteChain::default();
+    let server = ServerBuilder::new(1_000_000)
+        .bind(format!("{}:{}", "127.0.0.1", 26658), app)
+        .unwrap();
+    // std::thread::spawn(move || driver.run());
+    std::thread::spawn(move || server.listen().unwrap());
+
     rocket_build().await.launch().await.unwrap();
 }
