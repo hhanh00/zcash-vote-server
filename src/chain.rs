@@ -13,8 +13,7 @@ use r2d2::PooledConnection;
 use r2d2_sqlite::SqliteConnectionManager;
 use tendermint_abci::Application;
 use tendermint_proto::abci::{
-    ExecTxResult, RequestFinalizeBlock, RequestInfo, ResponseCommit, ResponseFinalizeBlock,
-    ResponseInfo,
+    ExecTxResult, RequestFinalizeBlock, RequestInfo, RequestQuery, ResponseCommit, ResponseFinalizeBlock, ResponseInfo, ResponseQuery
 };
 
 use crate::{
@@ -26,7 +25,7 @@ pub enum Command {
     Stop,
     Info(Sender<(u32, Vec<u8>)>),
     Ballot(String, Ballot, Sender<Result<String, String>>),
-    Commit(Sender<i64>),
+    Commit(Sender<AppState>),
 }
 
 #[derive(Clone)]
@@ -56,6 +55,7 @@ impl Application for VoteChain {
             .map_err(anyhow::Error::msg)
             .unwrap();
         let (height, hash) = rx_result.recv().unwrap();
+        println!("INFO {} {}", height, hex::encode(&hash));
 
         ResponseInfo {
             data: "zcash-vote-bft".to_string(),
@@ -66,20 +66,14 @@ impl Application for VoteChain {
         }
     }
 
-    fn query(
-        &self,
-        _request: tendermint_proto::abci::RequestQuery,
-    ) -> tendermint_proto::abci::ResponseQuery {
+    fn query(&self, _request: RequestQuery) -> ResponseQuery {
         Default::default()
     }
 
     fn finalize_block(&self, request: RequestFinalizeBlock) -> ResponseFinalizeBlock {
-        println!("finalize_block");
-
         let mut tx_results = vec![];
         for tx in request.txs.iter() {
             let Tx { id, ballot } = bincode::deserialize(&tx).unwrap();
-            println!("{}", hex::encode(&ballot.data.domain));
             let (tx_result, rx_result) = channel();
             self.cmd_tx
                 .send(Command::Ballot(id, ballot, tx_result))
@@ -100,10 +94,8 @@ impl Application for VoteChain {
                     ..Default::default()
                 },
             };
-            println!("{:?}", tx_result);
             tx_results.push(tx_result);
         }
-        println!("end finalize_block");
         ResponseFinalizeBlock {
             tx_results,
             ..Default::default()
@@ -111,15 +103,14 @@ impl Application for VoteChain {
     }
 
     fn commit(&self) -> ResponseCommit {
-        println!("commit");
         let (tx_result, rx_result) = channel();
         self.cmd_tx
             .send(Command::Commit(tx_result))
             .map_err(anyhow::Error::msg)
             .unwrap();
-        let height = rx_result.recv().unwrap();
+        let app_state = rx_result.recv().unwrap();
         ResponseCommit {
-            retain_height: height - 1,
+            retain_height: (app_state.height - 1) as i64,
         };
 
         Default::default()
@@ -138,8 +129,10 @@ impl VoteChainRunner {
         let connection = &self.connection;
         let s = load_prop(connection, "state").unwrap().unwrap();
         let app_state = serde_json::from_str::<AppState>(&s).unwrap();
+        println!("H: {}", &s);
         self.hash = hex::decode(&app_state.hash).unwrap();
         self.height = app_state.height;
+        println!("H: {}", self.height);
     }
 
     pub fn run(mut self) -> Result<()> {
@@ -152,10 +145,6 @@ impl VoteChainRunner {
                     result.send((self.height, self.hash.clone())).unwrap();
                 }
                 Command::Ballot(id, ballot, result) => {
-                    println!(
-                        "VoteChainRunner -> {}",
-                        hex::encode(&ballot.data.sighash().unwrap())
-                    );
                     let connection = &self.connection;
                     let res = move || {
                         let _ = connection.execute("ROLLBACK", []); // Ignore error
@@ -171,7 +160,6 @@ impl VoteChainRunner {
                             election.signature_required,
                             &BALLOT_VK,
                         )?;
-                        println!("Validated");
 
                         if data.anchors.nf != election.nf.0 {
                             anyhow::bail!("Incorrect nullifier root");
@@ -193,7 +181,7 @@ impl VoteChainRunner {
                             store_dnf(connection, id_election, &action.nf)?;
                         }
                         let cmx_root = cmx_frontier.root();
-                        println!("cmx_root  {}", hex::encode(cmx_root));
+                        tracing::info!("cmx_root  {}", hex::encode(cmx_root));
                         let cmx_frontier = serde_json::to_string(&cmx_frontier)?;
                         connection.execute(
                             "INSERT INTO cmx_frontiers(election, height, frontier)
@@ -201,15 +189,15 @@ impl VoteChainRunner {
                             params![id_election, height + 1, &cmx_frontier],
                         )?;
                         let height = crate::db::get_num_ballots(connection, id_election)?;
-                        println!("{height}");
+                        tracing::info!("{height}");
                         store_ballot(connection, id_election, height + 1, &ballot, &cmx_root)?;
                         let sighash = hex::encode(data.sighash()?);
-                        println!("{id_election} {sighash}");
+                        tracing::info!("{id_election} {sighash}");
 
                         Ok::<_, anyhow::Error>(sighash)
                     };
 
-                    println!("Ballot finalized");
+                    tracing::info!("Ballot finalized");
                     result.send(res().map_err(|e| e.to_string())).unwrap();
                 }
                 Command::Commit(result) => {
@@ -226,7 +214,10 @@ impl VoteChainRunner {
                     )?;
                     let rows =
                         s.query_map([], |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, u32>(1)?)))?;
-                    let mut hasher = Params::new().hash_length(32).personal(PERSO_VOTE_BFT).to_state();
+                    let mut hasher = Params::new()
+                        .hash_length(32)
+                        .personal(PERSO_VOTE_BFT)
+                        .to_state();
                     for r in rows {
                         let (h, _) = r?;
                         hasher.update(&h);
@@ -236,14 +227,14 @@ impl VoteChainRunner {
                     self.hash = hash;
                     self.height += 1;
 
-                    let state= AppState {
+                    let state = AppState {
                         height: self.height,
                         hash: hex::encode(&self.hash),
                     };
                     store_prop(connection, "state", &serde_json::to_string(&state).unwrap())?;
 
                     let _ = connection.execute("COMMIT", []);
-                    result.send(self.height as i64).unwrap();
+                    result.send(state).unwrap();
                 }
             }
         }

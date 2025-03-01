@@ -3,13 +3,8 @@ use orchard::vote::Ballot;
 use rocket::{http::Status, response::status::Custom, serde::json::Json, State};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tendermint_abci::ClientBuilder;
-use tendermint_proto::abci::RequestFinalizeBlock;
 
-use crate::{
-    context::Context,
-    db::get_election,
-};
+use crate::{context::Context, db::get_election};
 
 #[derive(Serialize, Deserialize)]
 pub struct Tx {
@@ -34,13 +29,6 @@ pub fn get_ballot_height(
     height: u32,
     state: &State<Context>,
 ) -> Result<Json<Value>, Custom<String>> {
-    // TODO: query block at height
-    // client.query(RequestQuery {
-    //         data: "test-key".into(),
-    //         path: "".to_string(),
-    //         height: 0,
-    //         prove: false,
-    //     })
     (|| {
         let connection = state.pool.get()?;
         let (id_election, _, _) = get_election(&connection, &id)?;
@@ -53,7 +41,6 @@ pub fn get_ballot_height(
 
 #[rocket::get("/election/<id>/num_ballots")]
 pub fn get_num_ballots(id: String, state: &State<Context>) -> Result<String, Custom<String>> {
-    // TODO: get current height
     (|| {
         let connection = state.pool.get()?;
         let (id_election, _, _) = get_election(&connection, &id)?;
@@ -64,24 +51,32 @@ pub fn get_num_ballots(id: String, state: &State<Context>) -> Result<String, Cus
 }
 
 #[rocket::post("/election/<id>/ballot", format = "json", data = "<ballot>")]
-pub fn post_ballot(
+pub async fn post_ballot(
     id: String,
     ballot: Json<Ballot>,
     state: &State<Context>,
 ) -> Result<String, Custom<String>> {
-    let res = || {
+    let res = async {
         let comet_bft = state.comet_bft;
         println!("Ballot received");
-        let tx = Tx { id, ballot: ballot.into_inner() };
+        let tx = Tx {
+            id,
+            ballot: ballot.into_inner(),
+        };
         let tx_bytes = bincode::serialize(&tx).unwrap();
 
-        let mut bft_client = ClientBuilder::default().connect(format!("127.0.0.1:{}", comet_bft)).unwrap();
-        bft_client.finalize_block(RequestFinalizeBlock {
-            txs: vec![tx_bytes.into()],
-            ..Default::default()
-        })?;
+        let rpc_port = comet_bft - 1;
+        let tx_data = hex::encode(&tx_bytes);
+        let rep = reqwest::get(format!("http://127.0.0.1:{rpc_port}/v1/broadcast_tx_sync?tx=0x{tx_data}")).await?;
+        let rep = rep.error_for_status()?;
+        let json_rep: Value = rep.json().await?;
+        if let Some(error_msg) = json_rep.pointer("/error/message") {
+            anyhow::bail!(error_msg.as_str().unwrap().to_string());
+        }
+        let result = &json_rep.pointer("/result/hash")
+            .map(|v| v.as_str().unwrap().to_string()).unwrap_or_default();
 
-        Ok::<_, Error>("".to_string())
+        Ok::<_, Error>(result.clone())
     };
-    res().map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+    res.await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))
 }

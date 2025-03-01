@@ -3,7 +3,7 @@ use blake2b_simd::Params;
 use orchard::vote::Ballot;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use zcash_vote::{db::{store_cmx_root, store_prop}, election::Election};
+use zcash_vote::{db::{load_prop, store_cmx_root, store_prop}, election::Election};
 
 #[derive(Serialize, Deserialize)]
 pub struct AppState {
@@ -31,14 +31,16 @@ pub fn create_schema(connection: &Connection) -> Result<()> {
         [],
     )?;
 
-    let hash = Params::new().hash_length(32).personal(b"Zcash_Vote_CmBFT").to_state().finalize();
-    let hash = hex::encode(&hash.as_bytes());
+    if load_prop(connection, "state")?.is_none() {
+        let hash = Params::new().hash_length(32).personal(b"Zcash_Vote_CmBFT").to_state().finalize();
+        let hash = hex::encode(&hash.as_bytes());
 
-    let initial_state= AppState {
-        height: 0,
-        hash,
-    };
-    store_prop(connection, "state", &serde_json::to_string(&initial_state).unwrap())?;
+        let initial_state= AppState {
+            height: 0,
+            hash,
+        };
+        store_prop(connection, "state", &serde_json::to_string(&initial_state).unwrap())?;
+    }
 
     Ok(())
 }
