@@ -182,7 +182,6 @@ impl VoteChainRunner {
                             store_dnf(connection, id_election, &action.nf)?;
                         }
                         let cmx_root = cmx_frontier.root();
-                        tracing::info!("cmx_root  {}", hex::encode(cmx_root));
                         let cmx_frontier = serde_json::to_string(&cmx_frontier)?;
                         connection.execute(
                             "INSERT INTO cmx_frontiers(election, height, frontier)
@@ -190,10 +189,10 @@ impl VoteChainRunner {
                             params![id_election, height + 1, &cmx_frontier],
                         )?;
                         let height = crate::db::get_num_ballots(connection, id_election)?;
-                        tracing::info!("{height}");
+                        tracing::info!("ballot height: {height}");
                         store_ballot(connection, id_election, height + 1, &ballot, &cmx_root)?;
                         let sighash = hex::encode(data.sighash()?);
-                        tracing::info!("{id_election} {sighash}");
+                        tracing::info!("election: {id_election} sighash: {sighash}");
 
                         let mut s = connection.prepare(
                             "SELECT t1.hash, t1.election

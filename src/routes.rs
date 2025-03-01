@@ -1,4 +1,5 @@
 use anyhow::Error;
+use base64::{prelude::BASE64_STANDARD, Engine as _};
 use orchard::vote::Ballot;
 use rocket::{http::Status, response::status::Custom, serde::json::Json, State};
 use serde::{Deserialize, Serialize};
@@ -58,7 +59,7 @@ pub async fn post_ballot(
 ) -> Result<String, Custom<String>> {
     let res = async {
         let comet_bft = state.comet_bft;
-        println!("Ballot received");
+        tracing::info!("Ballot received");
         let tx = Tx {
             id,
             ballot: ballot.into_inner(),
@@ -66,9 +67,18 @@ pub async fn post_ballot(
         let tx_bytes = bincode::serialize(&tx).unwrap();
 
         let rpc_port = comet_bft - 1;
-        let tx_data = hex::encode(&tx_bytes);
-        let rep = reqwest::get(format!("http://127.0.0.1:{rpc_port}/v1/broadcast_tx_sync?tx=0x{tx_data}")).await?;
-        let rep = rep.error_for_status()?;
+        let tx_data = BASE64_STANDARD.encode(&tx_bytes);
+        let req_body = serde_json::json!({
+            "id": "",
+            "method": "broadcast_tx_sync",
+            "params": [tx_data]
+        });
+        let url = format!("http://127.0.0.1:{rpc_port}/v1");
+        tracing::info!("{}", url);
+        tracing::info!("{}", serde_json::to_string(&req_body).unwrap());
+        let client = reqwest::Client::new();
+        let rep = client.post(&url)
+            .json(&req_body).send().await?.error_for_status()?;
         let json_rep: Value = rep.json().await?;
         if let Some(error_msg) = json_rep.pointer("/error/message") {
             anyhow::bail!(error_msg.as_str().unwrap().to_string());
