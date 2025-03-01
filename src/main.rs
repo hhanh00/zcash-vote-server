@@ -1,8 +1,10 @@
 use anyhow::{Error, Result};
-use rocket::{routes, Build, Config, Rocket, State};
+use rocket::{figment::Figment, routes, Build, Config, Rocket, State};
 use rocket_cors::CorsOptions;
 use rusqlite::params;
+use tendermint_abci::ServerBuilder;
 use zcash_vote_server::{
+    chain::VoteChain,
     context::Context,
     db::{create_schema, store_election},
     election::scan_data_dir,
@@ -19,24 +21,19 @@ fn index(context: &State<Context>) -> Result<String, String> {
     r().map_err(|e| e.to_string())
 }
 
-async fn rocket_build() -> Rocket<Build> {
-    let subscriber = tracing_subscriber::fmt()
-        .with_ansi(false)
-        .compact()
-        .finish();
-    tracing::subscriber::set_global_default(subscriber).unwrap();
+pub fn init_context(config: &Figment) -> Result<Context> {
+    let data_path: String = config.extract_inner("custom.data_path")?;
+    let db_path: String = config.extract_inner("custom.db_path")?;
+    let cometbft_port: u16 = config.extract_inner("custom.cometbft_port")?;
+    let context = Context::new(data_path, db_path, cometbft_port);
+    Ok(context)
+}
 
-    let config = Config::figment();
-
-    // Extract custom values
+async fn rocket_build(config: Figment, context: Context) -> Rocket<Build> {
     let init = async {
-        let data_path: String = config.extract_inner("custom.data_path")?;
-        let db_path: String = config.extract_inner("custom.db_path")?;
-        let context = Context::new(data_path, db_path);
         let elections = scan_data_dir(&context.data_path)?;
         tracing::info!("# elections = {}", elections.len());
         let connection = context.pool.get()?;
-        create_schema(&connection)?;
         connection.execute("UPDATE elections SET closed = TRUE", [])?;
         for e in elections.iter() {
             let connection = context.pool.get()?;
@@ -75,5 +72,28 @@ async fn rocket_build() -> Rocket<Build> {
 
 #[rocket::main]
 pub async fn main() {
-    rocket_build().await.launch().await.unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .compact()
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+
+    let config = Config::figment();
+    let context = init_context(&config).unwrap();
+    {
+        let connection = context.pool.get().unwrap();
+        create_schema(&connection).unwrap();
+    }
+
+    let (app, runner) = VoteChain::new(context.pool.get().unwrap());
+    let server = ServerBuilder::new(1_000_000)
+        .bind(format!("{}:{}", "127.0.0.1", context.comet_bft), app)
+        .unwrap();
+    std::thread::spawn(move || {
+        let res = runner.run();
+        println!("{:?}", res);
+    });
+    std::thread::spawn(move || server.listen().unwrap());
+
+    rocket_build(config, context).await.launch().await.unwrap();
 }

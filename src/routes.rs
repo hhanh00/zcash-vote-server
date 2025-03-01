@@ -1,18 +1,17 @@
 use anyhow::Error;
-use orchard::vote::{Ballot, Frontier, OrchardHash};
+use base64::{prelude::BASE64_STANDARD, Engine as _};
+use orchard::vote::Ballot;
 use rocket::{http::Status, response::status::Custom, serde::json::Json, State};
-use rusqlite::params;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use zcash_vote::{
-    as_byte256,
-    db::store_dnf,
-    election::{Election, BALLOT_VK},
-};
 
-use crate::{
-    context::Context,
-    db::{check_cmx_root, get_election, store_ballot},
-};
+use crate::{context::Context, db::get_election};
+
+#[derive(Serialize, Deserialize)]
+pub struct Tx {
+    pub id: String,
+    pub ballot: Ballot,
+}
 
 #[rocket::get("/election/<id>")]
 pub fn get_election_by_id(id: String, state: &State<Context>) -> Result<Json<Value>, String> {
@@ -53,63 +52,41 @@ pub fn get_num_ballots(id: String, state: &State<Context>) -> Result<String, Cus
 }
 
 #[rocket::post("/election/<id>/ballot", format = "json", data = "<ballot>")]
-pub fn post_ballot(
+pub async fn post_ballot(
     id: String,
     ballot: Json<Ballot>,
     state: &State<Context>,
 ) -> Result<String, Custom<String>> {
-    let res = || {
-        println!("Ballot received");
-        let pool = &state.pool;
-        let mut connection = pool.get()?;
-        let (id_election, election, closed) = get_election(&connection, &id)?;
-        if closed {
-            anyhow::bail!("Election is closed");
-        }
-        let election = serde_json::from_str::<Election>(&election)?;
-        let data = orchard::vote::validate_ballot(
-            ballot.clone().into_inner(),
-            election.signature_required,
-            &BALLOT_VK,
-        )?;
-        println!("Validated");
+    let res = async {
+        let comet_bft = state.comet_bft;
+        tracing::info!("Ballot received");
+        let tx = Tx {
+            id,
+            ballot: ballot.into_inner(),
+        };
+        let tx_bytes = bincode::serialize(&tx).unwrap();
 
-        let transaction = connection.transaction()?;
-        if data.anchors.nf != election.nf.0 {
-            anyhow::bail!("Incorrect nullifier root");
+        let rpc_port = comet_bft - 1;
+        let tx_data = BASE64_STANDARD.encode(&tx_bytes);
+        let req_body = serde_json::json!({
+            "id": "",
+            "method": "broadcast_tx_sync",
+            "params": [tx_data]
+        });
+        let url = format!("http://127.0.0.1:{rpc_port}/v1");
+        tracing::info!("{}", url);
+        tracing::info!("{}", serde_json::to_string(&req_body).unwrap());
+        let client = reqwest::Client::new();
+        let rep = client.post(&url)
+            .json(&req_body).send().await?.error_for_status()?;
+        let json_rep: Value = rep.json().await?;
+        if let Some(error_msg) = json_rep.pointer("/error/message") {
+            anyhow::bail!(error_msg.as_str().unwrap().to_string());
         }
-        check_cmx_root(&transaction, id_election, &data.anchors.cmx)?;
-        let height = transaction.query_row(
-            "SELECT MAX(height) FROM cmx_frontiers WHERE election = ?1",
-            [id_election],
-            |r| r.get::<_, u32>(0),
-        )?;
-        let cmx_frontier = transaction.query_row(
-            "SELECT frontier FROM cmx_frontiers WHERE election = ?1 AND height = ?2",
-            params![id_election, height],
-            |r| r.get::<_, String>(0),
-        )?;
-        let mut cmx_frontier = serde_json::from_str::<Frontier>(&cmx_frontier)?;
-        for action in data.actions.iter() {
-            cmx_frontier.append(OrchardHash(as_byte256(&action.cmx)));
-            store_dnf(&transaction, id_election, &action.nf)?;
-        }
-        let cmx_root = cmx_frontier.root();
-        println!("cmx_root  {}", hex::encode(cmx_root));
-        let cmx_frontier = serde_json::to_string(&cmx_frontier)?;
-        transaction.execute(
-            "INSERT INTO cmx_frontiers(election, height, frontier)
-        VALUES (?1, ?2, ?3)",
-            params![id_election, height + 1, &cmx_frontier],
-        )?;
-        let height = crate::db::get_num_ballots(&transaction, id_election)?;
-        println!("{height}");
-        store_ballot(&transaction, id_election, height + 1, &ballot, &cmx_root)?;
-        let sighash = hex::encode(data.sighash()?);
-        println!("{id_election} {sighash}");
-        transaction.commit()?;
-        println!("Commited");
-        Ok::<_, Error>(sighash)
+        let result = &json_rep.pointer("/result/hash")
+            .map(|v| v.as_str().unwrap().to_string()).unwrap_or_default();
+
+        Ok::<_, Error>(result.clone())
     };
-    res().map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+    res.await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))
 }
