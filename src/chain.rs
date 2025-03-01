@@ -13,7 +13,8 @@ use r2d2::PooledConnection;
 use r2d2_sqlite::SqliteConnectionManager;
 use tendermint_abci::Application;
 use tendermint_proto::abci::{
-    ExecTxResult, RequestFinalizeBlock, RequestInfo, RequestQuery, ResponseCommit, ResponseFinalizeBlock, ResponseInfo, ResponseQuery
+    ExecTxResult, RequestFinalizeBlock, RequestInfo, RequestQuery, ResponseCommit,
+    ResponseFinalizeBlock, ResponseInfo, ResponseQuery,
 };
 
 use crate::{
@@ -23,7 +24,7 @@ use crate::{
 
 pub enum Command {
     Stop,
-    Info(Sender<(u32, Vec<u8>)>),
+    Info(Sender<AppState>),
     Ballot(String, Ballot, Sender<Result<String, String>>),
     Commit(Sender<AppState>),
 }
@@ -38,8 +39,6 @@ impl VoteChain {
         let (cmd_tx, cmd_rx) = channel::<Command>();
         let s = Self { cmd_tx };
         let r = VoteChainRunner {
-            height: 0,
-            hash: vec![],
             connection,
             cmd_rx,
         };
@@ -54,15 +53,15 @@ impl Application for VoteChain {
             .send(Command::Info(tx_result))
             .map_err(anyhow::Error::msg)
             .unwrap();
-        let (height, hash) = rx_result.recv().unwrap();
-        println!("INFO {} {}", height, hex::encode(&hash));
+        let app_state = rx_result.recv().unwrap();
+        tracing::info!("INFO {:?}", app_state);
 
         ResponseInfo {
             data: "zcash-vote-bft".to_string(),
             version: "0.1.0".to_string(),
             app_version: 1,
-            last_block_height: height as i64,
-            last_block_app_hash: hash.into(),
+            last_block_height: app_state.height as i64,
+            last_block_app_hash: hex::decode(&app_state.hash).unwrap().into(),
         }
     }
 
@@ -79,13 +78,12 @@ impl Application for VoteChain {
                 .send(Command::Ballot(id, ballot, tx_result))
                 .map_err(anyhow::Error::msg)
                 .unwrap();
-            let sighash = rx_result.recv().unwrap();
+            let res = rx_result.recv().unwrap();
 
-            let tx_result = match sighash {
-                Ok(sighash) => ExecTxResult {
+            let tx_result = match res {
+                Ok(_) => ExecTxResult {
                     code: 0,
-                    data: sighash.as_bytes().to_vec().into(),
-                    log: format!("Validated {}", sighash),
+                    log: "Validated".to_string(),
                     ..Default::default()
                 },
                 Err(err) => ExecTxResult {
@@ -96,8 +94,17 @@ impl Application for VoteChain {
             };
             tx_results.push(tx_result);
         }
+
+        let (tx_result, rx_result) = channel();
+        self.cmd_tx
+            .send(Command::Info(tx_result))
+            .map_err(anyhow::Error::msg)
+            .unwrap();
+        let app_state = rx_result.recv().unwrap();
+
         ResponseFinalizeBlock {
             tx_results,
+            app_hash: hex::decode(&app_state.hash).unwrap().into(),
             ..Default::default()
         }
     }
@@ -119,30 +126,24 @@ impl Application for VoteChain {
 
 pub struct VoteChainRunner {
     connection: PooledConnection<SqliteConnectionManager>,
-    height: u32,
-    hash: Vec<u8>,
     cmd_rx: Receiver<Command>,
 }
 
 impl VoteChainRunner {
-    pub fn init(&mut self) {
-        let connection = &self.connection;
+    fn get_state(connection: &PooledConnection<SqliteConnectionManager>) -> AppState {
         let s = load_prop(connection, "state").unwrap().unwrap();
         let app_state = serde_json::from_str::<AppState>(&s).unwrap();
-        println!("H: {}", &s);
-        self.hash = hex::decode(&app_state.hash).unwrap();
-        self.height = app_state.height;
-        println!("H: {}", self.height);
+        app_state
     }
 
-    pub fn run(mut self) -> Result<()> {
-        self.init();
+    pub fn run(self) -> Result<()> {
         loop {
             let cmd = self.cmd_rx.recv().map_err(anyhow::Error::msg)?;
             match cmd {
                 Command::Stop => return Ok(()),
                 Command::Info(result) => {
-                    result.send((self.height, self.hash.clone())).unwrap();
+                    let app_state = Self::get_state(&self.connection);
+                    result.send(app_state).unwrap();
                 }
                 Command::Ballot(id, ballot, result) => {
                     let connection = &self.connection;
@@ -194,47 +195,64 @@ impl VoteChainRunner {
                         let sighash = hex::encode(data.sighash()?);
                         tracing::info!("{id_election} {sighash}");
 
+                        let mut s = connection.prepare(
+                            "SELECT t1.hash, t1.election
+                            FROM cmx_roots t1
+                            JOIN (
+                                SELECT election, MAX(height) AS max_height
+                                FROM cmx_roots
+                                GROUP BY election
+                            ) t2
+                            ON t1.election = t2.election AND t1.height = t2.max_height",
+                        )?;
+                        let rows = s.query_map([], |r| {
+                            Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, u32>(1)?))
+                        })?;
+                        let mut hasher = Params::new()
+                            .hash_length(32)
+                            .personal(PERSO_VOTE_BFT)
+                            .to_state();
+                        for r in rows {
+                            let (h, _) = r?;
+                            hasher.update(&h);
+                        }
+                        let hash = hasher.finalize();
+                        let hash = hash.as_bytes().to_vec();
+
+                        let app_state = Self::get_state(connection);
+                        let app_state = AppState {
+                            hash: hex::encode(&hash),
+                            ..app_state
+                        };
+                        store_prop(
+                            connection,
+                            "state",
+                            &serde_json::to_string(&app_state).unwrap(),
+                        )?;
+
+                        tracing::info!("Ballot finalized");
+
                         Ok::<_, anyhow::Error>(sighash)
                     };
 
-                    tracing::info!("Ballot finalized");
                     result.send(res().map_err(|e| e.to_string())).unwrap();
                 }
                 Command::Commit(result) => {
                     let connection = &self.connection;
-                    let mut s = connection.prepare(
-                        "SELECT t1.hash, t1.election
-                        FROM cmx_roots t1
-                        JOIN (
-                            SELECT election, MAX(height) AS max_height
-                            FROM cmx_roots
-                            GROUP BY election
-                        ) t2
-                        ON t1.election = t2.election AND t1.height = t2.max_height",
-                    )?;
-                    let rows =
-                        s.query_map([], |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, u32>(1)?)))?;
-                    let mut hasher = Params::new()
-                        .hash_length(32)
-                        .personal(PERSO_VOTE_BFT)
-                        .to_state();
-                    for r in rows {
-                        let (h, _) = r?;
-                        hasher.update(&h);
-                    }
-                    let hash = hasher.finalize();
-                    let hash = hash.as_bytes().to_vec();
-                    self.hash = hash;
-                    self.height += 1;
-
-                    let state = AppState {
-                        height: self.height,
-                        hash: hex::encode(&self.hash),
-                    };
-                    store_prop(connection, "state", &serde_json::to_string(&state).unwrap())?;
-
                     let _ = connection.execute("COMMIT", []);
-                    result.send(state).unwrap();
+
+                    let app_state = Self::get_state(connection);
+                    let app_state = AppState {
+                        height: app_state.height + 1,
+                        ..app_state
+                    };
+                    store_prop(
+                        connection,
+                        "state",
+                        &serde_json::to_string(&app_state).unwrap(),
+                    )?;
+
+                    result.send(app_state).unwrap();
                 }
             }
         }

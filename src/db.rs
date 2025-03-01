@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use zcash_vote::{db::{load_prop, store_cmx_root, store_prop}, election::Election};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct AppState {
     pub height: u32,
     pub hash: String,
