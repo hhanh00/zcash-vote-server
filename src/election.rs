@@ -5,7 +5,6 @@ use std::{
 
 use anyhow::Result;
 use zcash_vote::election::Election;
-use ff::PrimeField as _;
 
 pub fn scan_data_dir(data_dir: &str) -> Result<Vec<Election>> {
     let mut elections = vec![];
