@@ -220,7 +220,7 @@ impl VoteChainRunner {
                                     let exists = connection
                                         .query_row(
                                             "SELECT 1 FROM dnfs WHERE election = ?1 AND hash = ?2",
-                                            params![election.id, dnf],
+                                            params![&election.id(), dnf],
                                             |_| Ok(()),
                                         )
                                         .optional()
