@@ -1,6 +1,6 @@
 use anyhow::Result;
 use blake2b_simd::Params;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use zcash_vote::{
     as_byte256,
@@ -13,8 +13,7 @@ use r2d2::PooledConnection;
 use r2d2_sqlite::SqliteConnectionManager;
 use tendermint_abci::Application;
 use tendermint_proto::abci::{
-    ExecTxResult, RequestFinalizeBlock, RequestInfo, RequestQuery, ResponseCommit,
-    ResponseFinalizeBlock, ResponseInfo, ResponseQuery,
+    ExecTxResult, RequestCheckTx, RequestFinalizeBlock, RequestInfo, RequestQuery, ResponseCheckTx, ResponseCommit, ResponseFinalizeBlock, ResponseInfo, ResponseQuery
 };
 
 use crate::{
@@ -25,7 +24,8 @@ use crate::{
 pub enum Command {
     Stop,
     Info(Sender<AppState>),
-    Ballot(String, Ballot, Sender<Result<String, String>>),
+    CheckBallot(String, Ballot, Sender<Result<String, String>>),
+    FinalizeBallot(String, Ballot, Sender<Result<String, String>>),
     Commit(Sender<AppState>),
 }
 
@@ -41,6 +41,7 @@ impl VoteChain {
         let r = VoteChainRunner {
             connection,
             cmd_rx,
+            mp_nfs: vec![],
         };
         (s, r)
     }
@@ -69,13 +70,39 @@ impl Application for VoteChain {
         Default::default()
     }
 
+    fn check_tx(&self, request: RequestCheckTx) -> ResponseCheckTx {
+        let Tx { id, ballot } = bincode::deserialize(&request.tx).unwrap();
+        let (tx_result, rx_result) = channel();
+        self.cmd_tx
+            .send(Command::CheckBallot(id, ballot, tx_result))
+            .map_err(anyhow::Error::msg)
+            .unwrap();
+
+        let res = rx_result.recv().unwrap();
+        match res {
+            Ok(hash) =>
+                ResponseCheckTx {
+                    code: 0,
+                    data: hash.into(),
+                    ..Default::default()
+                },
+
+            Err(message) =>
+                ResponseCheckTx {
+                    code: 1,
+                    data: message.into(),
+                    ..Default::default()
+                },
+        }
+    }
+
     fn finalize_block(&self, request: RequestFinalizeBlock) -> ResponseFinalizeBlock {
         let mut tx_results = vec![];
         for tx in request.txs.iter() {
             let Tx { id, ballot } = bincode::deserialize(&tx).unwrap();
             let (tx_result, rx_result) = channel();
             self.cmd_tx
-                .send(Command::Ballot(id, ballot, tx_result))
+                .send(Command::FinalizeBallot(id, ballot, tx_result))
                 .map_err(anyhow::Error::msg)
                 .unwrap();
             let res = rx_result.recv().unwrap();
@@ -127,6 +154,7 @@ impl Application for VoteChain {
 pub struct VoteChainRunner {
     connection: PooledConnection<SqliteConnectionManager>,
     cmd_rx: Receiver<Command>,
+    mp_nfs: Vec<String>, // mempool nullfiiers
 }
 
 impl VoteChainRunner {
@@ -136,7 +164,7 @@ impl VoteChainRunner {
         app_state
     }
 
-    pub fn run(self) -> Result<()> {
+    pub fn run(mut self) -> Result<()> {
         loop {
             let cmd = self.cmd_rx.recv().map_err(anyhow::Error::msg)?;
             match cmd {
@@ -145,49 +173,95 @@ impl VoteChainRunner {
                     let app_state = Self::get_state(&self.connection);
                     result.send(app_state).unwrap();
                 }
-                Command::Ballot(id, ballot, result) => {
-                    let connection = &self.connection;
-                    let res = move || {
-                        let _ = connection.execute("ROLLBACK", []); // Ignore error
-                        connection.execute("BEGIN TRANSACTION", [])?;
-
+                Command::CheckBallot(id, ballot, result) => {
+                    let mut res = || {
+                        let connection = &self.connection;
                         let (id_election, election, closed) = get_election(connection, &id)?;
                         if closed {
                             anyhow::bail!("Election is closed");
                         }
                         let election = serde_json::from_str::<Election>(&election)?;
+                        // check ballot zkp, and signatures
                         let data = orchard::vote::validate_ballot(
                             ballot.clone(),
                             election.signature_required,
                             &BALLOT_VK,
                         )?;
 
+                        // check that the public data matches with the election params
+                        // nf_root & cmx_root
                         if data.anchors.nf != election.nf.0 {
                             anyhow::bail!("Incorrect nullifier root");
                         }
                         check_cmx_root(connection, id_election, &data.anchors.cmx)?;
+
+                        // check that we are not double spending a previous note
+                        for action in data.actions.iter() {
+                            let dnf = &action.nf;
+                            let exists = connection.query_row("SELECT 1 FROM dnfs WHERE election = ?1 AND hash = ?2",
+                                params![election.id, dnf], |_| Ok(())).optional()?.is_some();
+                            if exists {
+                                anyhow::bail!("Duplicate nullifier: double spend");
+                            }
+                            let dnf = hex::encode(dnf);
+                            if self.mp_nfs.contains(&dnf) {
+                                anyhow::bail!("Duplicate nullifier: double spend (mempool)");
+                            }
+                            self.mp_nfs.push(dnf.clone());
+                        }
+                        Ok::<_, anyhow::Error>(hex::encode(&data.sighash()?))
+                    };
+
+                    result.send(res().map_err(|e| e.to_string())).unwrap();
+                }
+                Command::FinalizeBallot(id, ballot, result) => {
+                    let connection = &self.connection;
+                    let mut res = || {
+                        let _ = connection.execute("ROLLBACK", []); // Ignore error
+                        connection.execute("BEGIN TRANSACTION", [])?;
+
+                        let (id_election, _, closed) = get_election(connection, &id)?;
+                        if closed {
+                            anyhow::bail!("Election is closed");
+                        }
+
+                        // election id, ballot zkp, signatures and
+                        // double spends were checked in check_tx
+                        let data = &ballot.data;
+
                         let height = connection.query_row(
                             "SELECT MAX(height) FROM cmx_frontiers WHERE election = ?1",
                             [id_election],
                             |r| r.get::<_, u32>(0),
                         )?;
-                        let cmx_frontier = connection.query_row(
-                                    "SELECT frontier FROM cmx_frontiers WHERE election = ?1 AND height = ?2",
-                                    params![id_election, height],
-                                    |r| r.get::<_, String>(0),
-                                )?;
-                        let mut cmx_frontier = serde_json::from_str::<Frontier>(&cmx_frontier)?;
-                        for action in data.actions.iter() {
-                            cmx_frontier.append(OrchardHash(as_byte256(&action.cmx)));
-                            store_dnf(connection, id_election, &action.nf)?;
-                        }
+
+                        let cmx_frontier = {
+                            // calculate the new cmx_frontier
+                            let cmx_frontier = connection.query_row(
+                                "SELECT frontier FROM cmx_frontiers WHERE election = ?1 AND height = ?2",
+                                params![id_election, height],
+                                |r| r.get::<_, String>(0),
+                            )?;
+                            let mut cmx_frontier = serde_json::from_str::<Frontier>(&cmx_frontier)?;
+                            for action in data.actions.iter() {
+                                cmx_frontier.append(OrchardHash(as_byte256(&action.cmx)));
+                                store_dnf(connection, id_election, &action.nf).map_err(|_|
+                                    anyhow::anyhow!("Duplicate nullifier: double spend"))?;
+                            }
+                            cmx_frontier
+                        };
+
                         let cmx_root = cmx_frontier.root();
-                        let cmx_frontier = serde_json::to_string(&cmx_frontier)?;
-                        connection.execute(
-                            "INSERT INTO cmx_frontiers(election, height, frontier)
-                            VALUES (?1, ?2, ?3)",
-                            params![id_election, height + 1, &cmx_frontier],
-                        )?;
+                        {
+                            // store the new cmx_frontier
+                            let cmx_frontier = serde_json::to_string(&cmx_frontier)?;
+                            connection.execute(
+                                "INSERT INTO cmx_frontiers(election, height, frontier)
+                                VALUES (?1, ?2, ?3)",
+                                params![id_election, height + 1, &cmx_frontier],
+                            )?;
+                        }
+
                         let height = crate::db::get_num_ballots(connection, id_election)?;
                         tracing::info!("ballot height: {height}");
                         store_ballot(connection, id_election, height + 1, &ballot, &cmx_root)?;
@@ -230,6 +304,7 @@ impl VoteChainRunner {
                         )?;
 
                         tracing::info!("Ballot finalized");
+                        self.mp_nfs.clear();
 
                         Ok::<_, anyhow::Error>(sighash)
                     };
