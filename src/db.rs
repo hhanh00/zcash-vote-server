@@ -67,7 +67,7 @@ pub fn store_election(connection: &Connection, election: &Election, closed: bool
         definition = excluded.definition,
         closed = excluded.closed
         RETURNING id_election",
-        params![election.id, serde_json::to_string(&election)?, closed],
+        params![&election.id(), serde_json::to_string(&election)?, closed],
         |r| r.get::<_, u32>(0),
     )?;
     Ok(id_election)

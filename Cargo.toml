@@ -25,7 +25,7 @@ base64 = "0.22"
 ff = "0.13.0"
 reqwest = {version = "0.12", features = ["json"]}
 
-zcash-vote = {git = "https://github.com/hhanh00/zcash-vote.git", rev="36ad385"}
+zcash-vote = {git = "https://github.com/hhanh00/zcash-vote.git", rev="8b42736"}
 orchard = "0.3.0"
 
 [patch.crates-io]
