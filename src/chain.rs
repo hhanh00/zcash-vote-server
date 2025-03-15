@@ -1,7 +1,10 @@
 use anyhow::Result;
 use blake2b_simd::Params;
 use rusqlite::{params, OptionalExtension};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    sync::mpsc::{channel, Receiver, Sender},
+};
 use zcash_vote::{
     as_byte256,
     db::{load_prop, store_dnf, store_prop},
@@ -13,7 +16,8 @@ use r2d2::PooledConnection;
 use r2d2_sqlite::SqliteConnectionManager;
 use tendermint_abci::Application;
 use tendermint_proto::abci::{
-    ExecTxResult, RequestCheckTx, RequestFinalizeBlock, RequestInfo, RequestQuery, ResponseCheckTx, ResponseCommit, ResponseFinalizeBlock, ResponseInfo, ResponseQuery
+    ExecTxResult, RequestCheckTx, RequestFinalizeBlock, RequestInfo, RequestQuery, ResponseCheckTx,
+    ResponseCommit, ResponseFinalizeBlock, ResponseInfo, ResponseQuery,
 };
 
 use crate::{
@@ -41,6 +45,7 @@ impl VoteChain {
         let r = VoteChainRunner {
             connection,
             cmd_rx,
+            check_cache: HashMap::new(),
             mp_nfs: vec![],
         };
         (s, r)
@@ -80,19 +85,23 @@ impl Application for VoteChain {
 
         let res = rx_result.recv().unwrap();
         match res {
-            Ok(hash) =>
+            Ok(hash) => {
+                tracing::info!("check_tx {}", hash);
                 ResponseCheckTx {
                     code: 0,
                     data: hash.into(),
                     ..Default::default()
-                },
+                }
+            }
 
-            Err(message) =>
+            Err(message) => {
+                tracing::error!("check_tx {}", message);
                 ResponseCheckTx {
                     code: 1,
                     data: message.into(),
                     ..Default::default()
-                },
+                }
+            }
         }
     }
 
@@ -154,6 +163,7 @@ impl Application for VoteChain {
 pub struct VoteChainRunner {
     connection: PooledConnection<SqliteConnectionManager>,
     cmd_rx: Receiver<Command>,
+    check_cache: HashMap<String, Result<String, String>>,
     mp_nfs: Vec<String>, // mempool nullfiiers
 }
 
@@ -174,45 +184,68 @@ impl VoteChainRunner {
                     result.send(app_state).unwrap();
                 }
                 Command::CheckBallot(id, ballot, result) => {
-                    let mut res = || {
-                        let connection = &self.connection;
-                        let (id_election, election, closed) = get_election(connection, &id)?;
-                        if closed {
-                            anyhow::bail!("Election is closed");
-                        }
-                        let election = serde_json::from_str::<Election>(&election)?;
-                        // check ballot zkp, and signatures
-                        let data = orchard::vote::validate_ballot(
-                            ballot.clone(),
-                            election.signature_required,
-                            &BALLOT_VK,
-                        )?;
+                    let sighash = hex::encode(ballot.data.sighash().unwrap());
+                    let r = match self.check_cache.entry(sighash.clone()) {
+                        Entry::Occupied(r) => r.get().clone(),
+                        Entry::Vacant(ve) => {
+                            let mut res = || {
+                                let connection = &self.connection;
+                                let (id_election, election, closed) =
+                                    get_election(connection, &id).map_err(|e| e.to_string())?;
+                                if closed {
+                                    return Err("Election is closed".to_string());
+                                }
+                                let election = serde_json::from_str::<Election>(&election)
+                                    .map_err(|e| e.to_string())?;
+                                // check ballot zkp, and signatures
+                                let data = orchard::vote::validate_ballot(
+                                    ballot.clone(),
+                                    election.signature_required,
+                                    &BALLOT_VK,
+                                )
+                                .map_err(|e| e.to_string())?;
+                                tracing::info!("Checking ballot {}", sighash);
 
-                        // check that the public data matches with the election params
-                        // nf_root & cmx_root
-                        if data.anchors.nf != election.nf.0 {
-                            anyhow::bail!("Incorrect nullifier root");
-                        }
-                        check_cmx_root(connection, id_election, &data.anchors.cmx)?;
+                                // check that the public data matches with the election params
+                                // nf_root & cmx_root
+                                if data.anchors.nf != election.nf.0 {
+                                    return Err("Incorrect nullifier root".to_string());
+                                }
+                                check_cmx_root(connection, id_election, &data.anchors.cmx)
+                                    .map_err(|e| e.to_string())?;
 
-                        // check that we are not double spending a previous note
-                        for action in data.actions.iter() {
-                            let dnf = &action.nf;
-                            let exists = connection.query_row("SELECT 1 FROM dnfs WHERE election = ?1 AND hash = ?2",
-                                params![election.id, dnf], |_| Ok(())).optional()?.is_some();
-                            if exists {
-                                anyhow::bail!("Duplicate nullifier: double spend");
-                            }
-                            let dnf = hex::encode(dnf);
-                            if self.mp_nfs.contains(&dnf) {
-                                anyhow::bail!("Duplicate nullifier: double spend (mempool)");
-                            }
-                            self.mp_nfs.push(dnf.clone());
+                                // check that we are not double spending a previous note
+                                for action in data.actions.iter() {
+                                    let dnf = &action.nf;
+                                    let exists = connection
+                                        .query_row(
+                                            "SELECT 1 FROM dnfs WHERE election = ?1 AND hash = ?2",
+                                            params![election.id, dnf],
+                                            |_| Ok(()),
+                                        )
+                                        .optional()
+                                        .unwrap()
+                                        .is_some();
+                                    if exists {
+                                        return Err("Duplicate nullifier: double spend".to_string());
+                                    }
+                                    let dnf = hex::encode(dnf);
+                                    tracing::info!("Checking {}", dnf);
+                                    if self.mp_nfs.contains(&dnf) {
+                                        return Err("Duplicate nullifier: double spend (mempool)"
+                                            .to_string());
+                                    }
+                                    self.mp_nfs.push(dnf.clone());
+                                }
+                                Ok::<_, String>(sighash.clone())
+                            };
+                            let r = res();
+                            ve.insert_entry(r.clone());
+                            r
                         }
-                        Ok::<_, anyhow::Error>(hex::encode(&data.sighash()?))
                     };
 
-                    result.send(res().map_err(|e| e.to_string())).unwrap();
+                    result.send(r).unwrap();
                 }
                 Command::FinalizeBallot(id, ballot, result) => {
                     let connection = &self.connection;
@@ -245,8 +278,9 @@ impl VoteChainRunner {
                             let mut cmx_frontier = serde_json::from_str::<Frontier>(&cmx_frontier)?;
                             for action in data.actions.iter() {
                                 cmx_frontier.append(OrchardHash(as_byte256(&action.cmx)));
-                                store_dnf(connection, id_election, &action.nf).map_err(|_|
-                                    anyhow::anyhow!("Duplicate nullifier: double spend"))?;
+                                store_dnf(connection, id_election, &action.nf).map_err(|_| {
+                                    anyhow::anyhow!("Duplicate nullifier: double spend")
+                                })?;
                             }
                             cmx_frontier
                         };
@@ -305,6 +339,7 @@ impl VoteChainRunner {
 
                         tracing::info!("Ballot finalized");
                         self.mp_nfs.clear();
+                        self.check_cache.clear();
 
                         Ok::<_, anyhow::Error>(sighash)
                     };
