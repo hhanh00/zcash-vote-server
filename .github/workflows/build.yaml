@@ -23,9 +23,10 @@ jobs:
         cp target/release/zcash-vote-server zcash-vote-server
         cp Rocket.toml zcash-vote-server
         mkdir zcash-vote-server/data
-    - uses: montudor/action-zip@v1
+    - uses: vimtor/action-zip@v1.2
       with:
-        args: zip -qq -r zcash-vote-server.zip zcash-vote-server
+        files: zcash-vote-server/
+        dest: zcash-vote-server.zip
     - name: Release
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/tags/')
