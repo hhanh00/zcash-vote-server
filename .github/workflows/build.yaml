@@ -21,4 +21,4 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/tags/')
       with:
-        files: zcash-vote-server
+        files: target/release/zcash-vote-server
