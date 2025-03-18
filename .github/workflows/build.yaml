@@ -16,7 +16,19 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build
-      run: cargo build
+      run: cargo build -r
+    - name: Staging
+      run: |
+        mkdir zcash-vote-server
+        cp target/release/zcash-vote-server zcash-vote-server
+        cp Rocket.toml zcash-vote-server
+        mkdir zcash-vote-server/data
+    - uses: vimtor/action-zip@v1.2
+      with:
+        files: zcash-vote-server/
+        dest: zcash-vote-server.zip
     - name: Release
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: zcash-vote-server.zip
