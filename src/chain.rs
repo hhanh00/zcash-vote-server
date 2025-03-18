@@ -2,7 +2,7 @@ use anyhow::Result;
 use blake2b_simd::Params;
 use rusqlite::{params, OptionalExtension};
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, HashSet},
     sync::mpsc::{channel, Receiver, Sender},
 };
 use zcash_vote::{
@@ -46,7 +46,7 @@ impl VoteChain {
             connection,
             cmd_rx,
             check_cache: HashMap::new(),
-            mp_nfs: vec![],
+            mp_nfs: HashSet::new(),
         };
         (s, r)
     }
@@ -164,7 +164,7 @@ pub struct VoteChainRunner {
     connection: PooledConnection<SqliteConnectionManager>,
     cmd_rx: Receiver<Command>,
     check_cache: HashMap<String, Result<String, String>>,
-    mp_nfs: Vec<String>, // mempool nullfiiers
+    mp_nfs: HashSet<String>, // mempool nullfiiers
 }
 
 impl VoteChainRunner {
@@ -235,7 +235,7 @@ impl VoteChainRunner {
                                         return Err("Duplicate nullifier: double spend (mempool)"
                                             .to_string());
                                     }
-                                    self.mp_nfs.push(dnf.clone());
+                                    self.mp_nfs.insert(dnf.clone());
                                 }
                                 Ok::<_, String>(sighash.clone())
                             };
@@ -337,9 +337,12 @@ impl VoteChainRunner {
                             &serde_json::to_string(&app_state).unwrap(),
                         )?;
 
+                        for a in ballot.data.actions.iter() {
+                            let dnf = hex::encode(&a.nf);
+                            self.mp_nfs.remove(&dnf);
+                        }
+                        self.check_cache.remove(&sighash);
                         tracing::info!("Ballot finalized");
-                        self.mp_nfs.clear();
-                        self.check_cache.clear();
 
                         Ok::<_, anyhow::Error>(sighash)
                     };
