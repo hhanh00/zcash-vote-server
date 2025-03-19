@@ -16,8 +16,9 @@ use r2d2::PooledConnection;
 use r2d2_sqlite::SqliteConnectionManager;
 use tendermint_abci::Application;
 use tendermint_proto::abci::{
-    ExecTxResult, RequestCheckTx, RequestFinalizeBlock, RequestInfo, RequestQuery, ResponseCheckTx,
-    ResponseCommit, ResponseFinalizeBlock, ResponseInfo, ResponseQuery,
+    ExecTxResult, RequestCheckTx, RequestFinalizeBlock, RequestInfo, RequestPrepareProposal,
+    RequestQuery, ResponseCheckTx, ResponseCommit, ResponseFinalizeBlock, ResponseInfo,
+    ResponsePrepareProposal, ResponseQuery,
 };
 
 use crate::{
@@ -29,6 +30,7 @@ pub enum Command {
     Stop,
     Info(Sender<AppState>),
     CheckBallot(String, Ballot, Sender<Result<String, String>>),
+    PrepareProposal(String, Ballot, Sender<Option<String>>),
     FinalizeBallot(String, Ballot, Sender<Result<String, String>>),
     Commit(Sender<AppState>),
 }
@@ -46,7 +48,7 @@ impl VoteChain {
             connection,
             cmd_rx,
             check_cache: HashMap::new(),
-            mp_nfs: HashSet::new(),
+            dnfs: HashSet::new(),
         };
         (s, r)
     }
@@ -76,6 +78,12 @@ impl Application for VoteChain {
     }
 
     fn check_tx(&self, request: RequestCheckTx) -> ResponseCheckTx {
+        tracing::info!(
+            "check_tx --> {} TYPE {}",
+            hex::encode(&request.tx[0..16]),
+            request.r#type
+        );
+
         let Tx { id, ballot } = bincode::deserialize(&request.tx).unwrap();
         let (tx_result, rx_result) = channel();
         self.cmd_tx
@@ -86,7 +94,7 @@ impl Application for VoteChain {
         let res = rx_result.recv().unwrap();
         match res {
             Ok(hash) => {
-                tracing::info!("check_tx {}", hash);
+                tracing::info!("check_tx ok: {}", hash);
                 ResponseCheckTx {
                     code: 0,
                     data: hash.into(),
@@ -95,7 +103,7 @@ impl Application for VoteChain {
             }
 
             Err(message) => {
-                tracing::error!("check_tx {}", message);
+                tracing::error!("check_tx failed: {}", message);
                 ResponseCheckTx {
                     code: 1,
                     data: message.into(),
@@ -103,6 +111,28 @@ impl Application for VoteChain {
                 }
             }
         }
+    }
+
+    fn prepare_proposal(&self, request: RequestPrepareProposal) -> ResponsePrepareProposal {
+        let mut filtered_txs = vec![];
+        for tx in request.txs.into_iter() {
+            let Tx { id, ballot } = bincode::deserialize(&tx).unwrap();
+            let sighash = hex::encode(&ballot.data.sighash().unwrap());
+            let (tx_result, rx_result) = channel();
+            self.cmd_tx
+                .send(Command::PrepareProposal(id, ballot, tx_result))
+                .map_err(anyhow::Error::msg)
+                .unwrap();
+            let res = rx_result.recv().unwrap();
+            match res {
+                None => {
+                    tracing::info!("prepare_proposal: {}", sighash);
+                    filtered_txs.push(tx)
+                }
+                Some(error) => tracing::error!("prepare_proposal: {}", error),
+            }
+        }
+        ResponsePrepareProposal { txs: filtered_txs }
     }
 
     fn finalize_block(&self, request: RequestFinalizeBlock) -> ResponseFinalizeBlock {
@@ -115,6 +145,7 @@ impl Application for VoteChain {
                 .map_err(anyhow::Error::msg)
                 .unwrap();
             let res = rx_result.recv().unwrap();
+            tracing::info!("finalize_block: {:?}", res);
 
             let tx_result = match res {
                 Ok(_) => ExecTxResult {
@@ -164,7 +195,7 @@ pub struct VoteChainRunner {
     connection: PooledConnection<SqliteConnectionManager>,
     cmd_rx: Receiver<Command>,
     check_cache: HashMap<String, Result<String, String>>,
-    mp_nfs: HashSet<String>, // mempool nullfiiers
+    dnfs: HashSet<String>,
 }
 
 impl VoteChainRunner {
@@ -188,7 +219,7 @@ impl VoteChainRunner {
                     let r = match self.check_cache.entry(sighash.clone()) {
                         Entry::Occupied(r) => r.get().clone(),
                         Entry::Vacant(ve) => {
-                            let mut res = || {
+                            let res = || {
                                 let connection = &self.connection;
                                 let (id_election, election, closed) =
                                     get_election(connection, &id).map_err(|e| e.to_string())?;
@@ -229,13 +260,6 @@ impl VoteChainRunner {
                                     if exists {
                                         return Err("Duplicate nullifier: double spend".to_string());
                                     }
-                                    let dnf = hex::encode(dnf);
-                                    tracing::info!("Checking {}", dnf);
-                                    if self.mp_nfs.contains(&dnf) {
-                                        return Err("Duplicate nullifier: double spend (mempool)"
-                                            .to_string());
-                                    }
-                                    self.mp_nfs.insert(dnf.clone());
                                 }
                                 Ok::<_, String>(sighash.clone())
                             };
@@ -246,6 +270,18 @@ impl VoteChainRunner {
                     };
 
                     result.send(r).unwrap();
+                }
+                Command::PrepareProposal(_, ballot, sender) => {
+                    for a in ballot.data.actions.iter() {
+                        let dnf = hex::encode(&a.nf);
+                        let new_spend = self.dnfs.insert(dnf);
+                        if !new_spend {
+                            sender.send(Some("Double spend".to_string()))?;
+                        }
+                        else {
+                            sender.send(None)?;
+                        }
+                    }
                 }
                 Command::FinalizeBallot(id, ballot, result) => {
                     let connection = &self.connection;
@@ -337,11 +373,8 @@ impl VoteChainRunner {
                             &serde_json::to_string(&app_state).unwrap(),
                         )?;
 
-                        for a in ballot.data.actions.iter() {
-                            let dnf = hex::encode(&a.nf);
-                            self.mp_nfs.remove(&dnf);
-                        }
                         self.check_cache.remove(&sighash);
+                        self.dnfs.clear();
                         tracing::info!("Ballot finalized");
 
                         Ok::<_, anyhow::Error>(sighash)
