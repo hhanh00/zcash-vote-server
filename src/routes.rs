@@ -74,13 +74,13 @@ pub async fn post_ballot(
             "params": [tx_data]
         });
         let url = format!("http://127.0.0.1:{rpc_port}/v1");
-        tracing::info!("{}", url);
-        tracing::info!("{}", serde_json::to_string(&req_body).unwrap());
+        tracing::info!("Post to {}", url);
         let client = reqwest::Client::new();
         let rep = client.post(&url)
             .json(&req_body).send().await?.error_for_status()?;
         let json_rep: Value = rep.json().await?;
-        if let Some(error_msg) = json_rep.pointer("/error/message") {
+        tracing::info!("post ballot rep: {:?}", json_rep);
+        if let Some(error_msg) = json_rep.pointer("/error/data") {
             anyhow::bail!(error_msg.as_str().unwrap().to_string());
         }
         let result = &json_rep.pointer("/result/hash")
