@@ -1,6 +1,6 @@
 use anyhow::Result;
 use blake2b_simd::Params;
-use sqlx::{sqlite::SqliteRow, SqlitePool, Row};
+use sqlx::{sqlite::SqliteRow, Acquire, Row, SqliteConnection, SqlitePool};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     sync::mpsc::{channel, Receiver, Sender},
@@ -197,7 +197,7 @@ pub struct VoteChainRunner {
 }
 
 impl VoteChainRunner {
-    async fn get_state(connection: &SqlitePool) -> AppState {
+    async fn get_state(connection: &mut SqliteConnection) -> AppState {
         let s = load_prop(connection, "state").await.unwrap().unwrap();
         let app_state = serde_json::from_str::<AppState>(&s).unwrap();
         app_state
@@ -207,18 +207,19 @@ impl VoteChainRunner {
         match cmd {
             Command::Stop => return Ok(()), // handled by caller
             Command::Info(result) => {
-                let app_state = Self::get_state(&self.connection).await;
+                let mut connection = self.connection.acquire().await?;
+                let app_state = Self::get_state(&mut connection).await;
                 result.send(app_state).unwrap();
             }
             Command::CheckBallot(id, ballot, result) => {
                 let sighash = hex::encode(ballot.data.sighash().unwrap());
+                let mut connection = self.connection.acquire().await?;
                 let r = match self.check_cache.entry(sighash.clone()) {
                     Entry::Occupied(r) => r.get().clone(),
                     Entry::Vacant(ve) => {
                         let res = async {
-                            let connection = &self.connection;
                             let (id_election, election, closed) =
-                                get_election(connection, &id).await.map_err(|e| e.to_string())?;
+                                get_election(&mut connection, &id).await.map_err(|e| e.to_string())?;
                             if closed {
                                 return Err("Election is closed".to_string());
                             }
@@ -238,7 +239,7 @@ impl VoteChainRunner {
                             if data.anchors.nf != election.nf.0 {
                                 return Err("Incorrect nullifier root".to_string());
                             }
-                            check_cmx_root(connection, id_election, &data.anchors.cmx)
+                            check_cmx_root(&mut connection, id_election, &data.anchors.cmx)
                             .await.map_err(|e| e.to_string())?;
 
                             // check that we are not double spending a previous note
@@ -249,7 +250,7 @@ impl VoteChainRunner {
                                 )
                                 .bind(id_election)
                                 .bind(dnf)
-                                .fetch_optional(connection)
+                                .fetch_optional(&mut *connection)
                                 .await
                                 .expect("SQL error")
                                 .is_some();
@@ -280,12 +281,13 @@ impl VoteChainRunner {
                 }
             }
             Command::FinalizeBallot(id, ballot, result) => {
-                let connection = &self.connection;
-                let res = async {
-                    sqlx::query("ROLLBACK").execute(connection).await?;
-                    sqlx::query("BEGIN TRANSACTION").execute(connection).await?;
+                let res = async move {
+                    let mut db_tx = self.connection.begin().await?;
+                    let c = db_tx.acquire().await?;
+                        let _ = sqlx::query("ROLLBACK").execute(&mut *c).await;
+                    sqlx::query("BEGIN TRANSACTION").execute(&mut *c).await?;
 
-                    let (id_election, _, closed) = get_election(connection, &id).await?;
+                    let (id_election, _, closed) = get_election(c, &id).await?;
                     if closed {
                         anyhow::bail!("Election is closed");
                     }
@@ -297,7 +299,7 @@ impl VoteChainRunner {
                     let (height,): (u32,) =
                         sqlx::query_as("SELECT MAX(height) FROM cmx_frontiers WHERE election = ?1")
                             .bind(id_election)
-                            .fetch_one(connection)
+                            .fetch_one(&mut *c)
                             .await?;
 
                     let cmx_frontier = {
@@ -306,15 +308,15 @@ impl VoteChainRunner {
                             "SELECT frontier FROM cmx_frontiers WHERE election = ?1 AND height = ?2")
                             .bind(id_election)
                             .bind(height)
-                            .fetch_one(connection)
+                            .fetch_one(&mut *c)
                             .await?;
                         let mut cmx_frontier = serde_json::from_str::<Frontier>(&cmx_frontier)?;
                         for action in data.actions.iter() {
                             cmx_frontier.append(OrchardHash(as_byte256(&action.cmx)));
-                            store_dnf(connection, id_election, &action.nf)
+                            store_dnf(c, id_election, &action.nf)
                                 .await
-                                .map_err(|_| {
-                                    anyhow::anyhow!("Duplicate nullifier: double spend")
+                                .map_err(|e| {
+                                    anyhow::anyhow!("Duplicate nullifier: double spend - {e}")
                                 })?;
                         }
                         cmx_frontier
@@ -331,13 +333,13 @@ impl VoteChainRunner {
                         .bind(id_election)
                         .bind(height + 1)
                         .bind(&cmx_frontier)
-                        .execute(connection)
+                        .execute(&mut *c)
                         .await?;
                     }
 
-                    let height = crate::db::get_num_ballots(connection, id_election).await?;
+                    let height = crate::db::get_num_ballots(c, id_election).await?;
                     tracing::info!("ballot height: {height}");
-                    store_ballot(connection, id_election, height + 1, &ballot, &cmx_root).await?;
+                    store_ballot(c, id_election, height + 1, &ballot, &cmx_root).await?;
                     let sighash = hex::encode(data.sighash()?);
                     tracing::info!("election: {id_election} sighash: {sighash}");
 
@@ -358,7 +360,7 @@ impl VoteChainRunner {
                             let hash: Vec<u8> = row.get(0);
                             hash
                         })
-                        .fetch_all(connection).await?;
+                        .fetch_all(&mut *c).await?;
                     let mut hasher = Params::new()
                         .hash_length(32)
                         .personal(PERSO_VOTE_BFT)
@@ -369,19 +371,20 @@ impl VoteChainRunner {
                     let hash = hasher.finalize();
                     let hash = hash.as_bytes().to_vec();
 
-                    let app_state = Self::get_state(connection).await;
+                    let app_state = Self::get_state(c).await;
                     let app_state = AppState {
                         hash: hex::encode(&hash),
                         ..app_state
                     };
                     store_prop(
-                        connection,
+                        c,
                         "state",
                         &serde_json::to_string(&app_state).unwrap(),
                     ).await?;
 
                     self.check_cache.remove(&sighash);
                     self.dnfs.clear();
+                    db_tx.commit().await?;
                     tracing::info!("Ballot finalized");
 
                     Ok::<_, anyhow::Error>(sighash)
@@ -390,16 +393,14 @@ impl VoteChainRunner {
                 result.send(res.await.map_err(|e| e.to_string())).unwrap();
             }
             Command::Commit(result) => {
-                let connection = &self.connection;
-                sqlx::query("COMMIT").execute(connection).await?;
-
-                let app_state = Self::get_state(connection).await;
+                let mut connection = self.connection.acquire().await?;
+                let app_state = Self::get_state(&mut connection).await;
                 let app_state = AppState {
                     height: app_state.height + 1,
                     ..app_state
                 };
                 store_prop(
-                    connection,
+                    &mut connection,
                     "state",
                     &serde_json::to_string(&app_state).unwrap(),
                 ).await?;

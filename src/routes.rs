@@ -16,8 +16,8 @@ pub struct Tx {
 #[rocket::get("/election/<id>")]
 pub async fn get_election_by_id(id: String, state: &State<Context>) -> Result<Json<Value>, String> {
     (async {
-        let connection = &state.pool;
-        let (_, election, _) = get_election(connection, &id).await?;
+        let mut connection = state.pool.acquire().await?;
+        let (_, election, _) = get_election(&mut connection, &id).await?;
         let election = serde_json::from_str::<Value>(&election)?;
         Ok::<_, Error>(Json(election))
     }).await
@@ -31,9 +31,9 @@ pub async fn get_ballot_height(
     state: &State<Context>,
 ) -> Result<Json<Value>, Custom<String>> {
     (async {
-        let connection = &state.pool;
-        let (id_election, _, _) = get_election(connection, &id).await?;
-        let ballot = crate::db::get_ballot_height(&connection, id_election, height).await?;
+        let mut connection = state.pool.acquire().await?;
+        let (id_election, _, _) = get_election(&mut connection, &id).await?;
+        let ballot = crate::db::get_ballot_height(&mut connection, id_election, height).await?;
         let ballot = serde_json::from_str::<Value>(&ballot)?;
         Ok::<_, Error>(Json(ballot))
     }).await
@@ -43,9 +43,9 @@ pub async fn get_ballot_height(
 #[rocket::get("/election/<id>/num_ballots")]
 pub async fn get_num_ballots(id: String, state: &State<Context>) -> Result<String, Custom<String>> {
     (async {
-        let connection = &state.pool;
-        let (id_election, _, _) = get_election(connection, &id).await?;
-        let n = crate::db::get_num_ballots(&connection, id_election).await?;
+        let mut connection = state.pool.acquire().await?;
+        let (id_election, _, _) = get_election(&mut connection, &id).await?;
+        let n = crate::db::get_num_ballots(&mut connection, id_election).await?;
         Ok::<_, Error>(n.to_string())
     }).await
     .map_err(|e| Custom(Status::InternalServerError, e.to_string()))

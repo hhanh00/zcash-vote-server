@@ -23,7 +23,7 @@ blake2b_simd = "1.0.2"
 base64 = "0.22"
 reqwest = {version = "0.12", features = ["json"]}
 
-zcash-vote = {git = "https://github.com/hhanh00/zcash-vote.git", rev="724d49ca1a1386f0ca22697c40a8bccadda1c1d8"}
+zcash-vote = {git = "https://github.com/hhanh00/zcash-vote.git", rev="abb5d352732d5712ac0e5d672b5e2ff7f02ec9e9"}
 orchard = "0.11.0"
 
 [patch.crates-io]
@@ -33,7 +33,7 @@ orchard = {git = "https://github.com/hhanh00/orchard.git", rev="75448e671f56f7c6
 #halo2_proofs = { git = "https://github.com/zcash/halo2.git", rev = "642924d614305d882cc122739c59144109f4bd3f" }
 
 [patch."https://github.com/hhanh00/zcash-vote.git"]
-#zcash-vote = {path = "../zwallet/native/zcash-vote"}
+#zcash-vote = {path = "../zcash-vote"}
 
 [profile.dev]
 opt-level = 3

@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use sqlx::{sqlite::SqliteConnectOptions, SqlitePool};
 
 pub struct Context {
     pub data_path: String,
@@ -9,7 +9,10 @@ pub struct Context {
 
 impl Context {
     pub async fn new(data_path: String, db_path: String, comet_bft: u16) -> Self {
-        let pool = SqlitePool::connect(&format!("sqlite://{}", db_path))
+        let options = SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true);
+        let pool = SqlitePool::connect_with(options)
             .await
             .expect("Failed to connect to SQLite database");
 
