@@ -10,9 +10,8 @@ tracing-subscriber = { version = "0.3.18", features = [ "env-filter" ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 bincode = "1.3.3"
-rusqlite = "0.29.0"
-r2d2 = "0.8.10"
-r2d2_sqlite = "0.22.0"
+sqlx = {version = "0.8", features = ["runtime-tokio", "sqlite", "macros", "migrate"]}
+libsqlite3-sys = { version = "0.28", features = ["bundled"] }
 hex = "0.4.3"
 rocket = { version = "0.5.1", features = ["json", "tls"] }
 rocket_cors = "0.6.0"
@@ -24,14 +23,14 @@ blake2b_simd = "1.0.2"
 base64 = "0.22"
 reqwest = {version = "0.12", features = ["json"]}
 
-zcash-vote = {git = "https://github.com/hhanh00/zcash-vote.git", rev="8b42736"}
-orchard = "0.3.0"
+zcash-vote = {git = "https://github.com/hhanh00/zcash-vote.git", rev="724d49ca1a1386f0ca22697c40a8bccadda1c1d8"}
+orchard = "0.11.0"
 
 [patch.crates-io]
-orchard = {git = "https://github.com/hhanh00/orchard.git", rev="dff7dee"}
+orchard = {git = "https://github.com/hhanh00/orchard.git", rev="75448e671f56f7c6d3f29502f5a26370a056b86c"}
 #orchard = {path="../orchard"}
-halo2_gadgets  = { git = "https://github.com/zcash/halo2.git", rev = "642924d614305d882cc122739c59144109f4bd3f" }
-halo2_proofs = { git = "https://github.com/zcash/halo2.git", rev = "642924d614305d882cc122739c59144109f4bd3f" }
+#halo2_gadgets  = { git = "https://github.com/zcash/halo2.git", rev = "642924d614305d882cc122739c59144109f4bd3f" }
+#halo2_proofs = { git = "https://github.com/zcash/halo2.git", rev = "642924d614305d882cc122739c59144109f4bd3f" }
 
 [patch."https://github.com/hhanh00/zcash-vote.git"]
 #zcash-vote = {path = "../zwallet/native/zcash-vote"}
