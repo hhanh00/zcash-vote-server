@@ -2,7 +2,7 @@ use anyhow::Result;
 use blake2b_simd::Params;
 use orchard::vote::Ballot;
 use serde::{Deserialize, Serialize};
-use sqlx::{sqlite::SqliteRow, Row, SqlitePool};
+use sqlx::{sqlite::SqliteRow, Row, SqliteConnection, SqlitePool};
 use zcash_vote::{
     db::{load_prop, store_cmx_root, store_prop},
     election::Election,
@@ -17,13 +17,14 @@ pub struct AppState {
 pub async fn create_schema(connection: &SqlitePool) -> Result<()> {
     zcash_vote::db::create_schema(connection).await?;
 
+    let mut connection = connection.acquire().await?;
     sqlx::query(
         r#"CREATE TABLE IF NOT EXISTS properties(
         id_property INTEGER PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
         value TEXT NOT NULL)"#,
     )
-    .execute(connection)
+    .execute(&mut *connection)
     .await?;
 
     sqlx::query(
@@ -33,10 +34,10 @@ pub async fn create_schema(connection: &SqlitePool) -> Result<()> {
         definition TEXT NOT NULL,
         closed BOOLEAN NOT NULL)"#,
     )
-    .execute(connection)
+    .execute(&mut *connection)
     .await?;
 
-    if load_prop(connection, "state").await?.is_none() {
+    if load_prop(&mut connection, "state").await?.is_none() {
         let hash = Params::new()
             .hash_length(32)
             .personal(b"Zcash_Vote_CmBFT")
@@ -46,7 +47,7 @@ pub async fn create_schema(connection: &SqlitePool) -> Result<()> {
 
         let initial_state = AppState { height: 0, hash };
         store_prop(
-            connection,
+            &mut connection,
             "state",
             &serde_json::to_string(&initial_state).unwrap(),
         )
@@ -56,7 +57,7 @@ pub async fn create_schema(connection: &SqlitePool) -> Result<()> {
     Ok(())
 }
 
-pub async fn get_election(connection: &SqlitePool, id: &str) -> Result<(u32, String, bool)> {
+pub async fn get_election(connection: &mut SqliteConnection, id: &str) -> Result<(u32, String, bool)> {
     let res = sqlx::query("SELECT id_election, definition, closed FROM elections WHERE id = ?1")
         .bind(id)
         .map(|r: SqliteRow| {
@@ -71,7 +72,7 @@ pub async fn get_election(connection: &SqlitePool, id: &str) -> Result<(u32, Str
 }
 
 pub async fn store_election(
-    connection: &SqlitePool,
+    connection: &mut SqliteConnection,
     election: &Election,
     closed: bool,
 ) -> Result<u32> {
@@ -91,7 +92,7 @@ pub async fn store_election(
     Ok(id_election)
 }
 
-pub async fn check_cmx_root(connection: &SqlitePool, id_election: u32, cmx: &[u8]) -> Result<()> {
+pub async fn check_cmx_root(connection: &mut SqliteConnection, id_election: u32, cmx: &[u8]) -> Result<()> {
     let r = sqlx::query("SELECT 1 FROM cmx_roots WHERE election = ?1 AND hash = ?2")
         .bind(id_election)
         .bind(cmx)
@@ -104,7 +105,7 @@ pub async fn check_cmx_root(connection: &SqlitePool, id_election: u32, cmx: &[u8
 }
 
 pub async fn store_ballot(
-    connection: &SqlitePool,
+    connection: &mut SqliteConnection,
     id_election: u32,
     height: u32,
     ballot: &Ballot,
@@ -120,7 +121,7 @@ pub async fn store_ballot(
     .bind(height)
     .bind(&hash)
     .bind(serde_json::to_string(ballot)?)
-    .execute(connection)
+    .execute(&mut *connection)
     .await?;
     let id_ballot = r.last_insert_rowid() as u32;
 
@@ -129,7 +130,7 @@ pub async fn store_ballot(
 }
 
 pub async fn get_ballot_height(
-    connection: &SqlitePool,
+    connection: &mut SqliteConnection,
     id_election: u32,
     height: u32,
 ) -> Result<String> {
@@ -142,7 +143,7 @@ pub async fn get_ballot_height(
     Ok(e)
 }
 
-pub async fn get_num_ballots(connection: &SqlitePool, id_election: u32) -> Result<u32> {
+pub async fn get_num_ballots(connection: &mut SqliteConnection, id_election: u32) -> Result<u32> {
     let (n,): (u32,) = sqlx::query_as("SELECT COUNT(*) FROM ballots WHERE election = ?1")
         .bind(id_election)
         .fetch_one(connection)

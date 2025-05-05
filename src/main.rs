@@ -35,12 +35,12 @@ async fn rocket_build(config: Figment, context: Context) -> Rocket<Build> {
     let init = async {
         let elections = scan_data_dir(&context.data_path)?;
         tracing::info!("# elections = {}", elections.len());
-        let connection = &context.pool;
+        let mut connection = context.pool.acquire().await?;
         sqlx::query("UPDATE elections SET closed = TRUE")
-            .execute(connection)
+            .execute(&mut *connection)
             .await?;
         for e in elections.iter() {
-            let id_election = store_election(&connection, e, false).await?;
+            let id_election = store_election(&mut connection, e, false).await?;
             let cmx_root = e.cmx_frontier.as_ref().unwrap().root();
             let frontier = serde_json::to_string(&e.cmx_frontier)?;
             sqlx::query(
@@ -49,7 +49,7 @@ async fn rocket_build(config: Figment, context: Context) -> Rocket<Build> {
             )
             .bind(id_election)
             .bind(&frontier)
-            .execute(connection)
+            .execute(&mut *connection)
             .await?;
             sqlx::query(
                 "INSERT INTO cmx_roots(election, height, hash)
@@ -57,7 +57,7 @@ async fn rocket_build(config: Figment, context: Context) -> Rocket<Build> {
             )
             .bind(id_election)
             .bind(cmx_root.as_slice())
-            .execute(connection)
+            .execute(&mut *connection)
             .await?;
         }
 
