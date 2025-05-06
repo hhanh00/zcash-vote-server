@@ -2,7 +2,7 @@ use anyhow::Result;
 use blake2b_simd::Params;
 use orchard::vote::Ballot;
 use serde::{Deserialize, Serialize};
-use sqlx::{sqlite::SqliteRow, Row, SqliteConnection, SqlitePool};
+use sqlx::{sqlite::SqliteRow, Row, SqliteConnection};
 use zcash_vote::{
     db::{load_prop, store_cmx_root, store_prop},
     election::Election,
@@ -14,10 +14,9 @@ pub struct AppState {
     pub hash: String,
 }
 
-pub async fn create_schema(connection: &SqlitePool) -> Result<()> {
+pub async fn create_schema(connection: &mut SqliteConnection) -> Result<()> {
     zcash_vote::db::create_schema(connection).await?;
 
-    let mut connection = connection.acquire().await?;
     sqlx::query(
         r#"CREATE TABLE IF NOT EXISTS properties(
         id_property INTEGER PRIMARY KEY,
@@ -37,7 +36,7 @@ pub async fn create_schema(connection: &SqlitePool) -> Result<()> {
     .execute(&mut *connection)
     .await?;
 
-    if load_prop(&mut connection, "state").await?.is_none() {
+    if load_prop(connection, "state").await?.is_none() {
         let hash = Params::new()
             .hash_length(32)
             .personal(b"Zcash_Vote_CmBFT")
@@ -47,7 +46,7 @@ pub async fn create_schema(connection: &SqlitePool) -> Result<()> {
 
         let initial_state = AppState { height: 0, hash };
         store_prop(
-            &mut connection,
+            connection,
             "state",
             &serde_json::to_string(&initial_state).unwrap(),
         )

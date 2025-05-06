@@ -23,7 +23,7 @@ blake2b_simd = "1.0.2"
 base64 = "0.22"
 reqwest = {version = "0.12", features = ["json"]}
 
-zcash-vote = {git = "https://github.com/hhanh00/zcash-vote.git", rev="abb5d352732d5712ac0e5d672b5e2ff7f02ec9e9"}
+zcash-vote = {git = "https://github.com/hhanh00/zcash-vote.git", rev="f05f5f2569f286f3ef09ed7edfd008a6b4f35777"}
 orchard = "0.11.0"
 
 [patch.crates-io]

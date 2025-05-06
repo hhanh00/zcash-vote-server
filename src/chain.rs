@@ -1,6 +1,6 @@
 use anyhow::Result;
 use blake2b_simd::Params;
-use sqlx::{sqlite::SqliteRow, Acquire, Row, SqliteConnection, SqlitePool};
+use sqlx::{sqlite::SqliteRow, Acquire, Row, SqliteConnection};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     sync::mpsc::{channel, Receiver, Sender},
@@ -39,7 +39,7 @@ pub struct VoteChain {
 }
 
 impl VoteChain {
-    pub fn new(connection: SqlitePool) -> (Self, VoteChainRunner) {
+    pub fn new(connection: SqliteConnection) -> (Self, VoteChainRunner) {
         let (cmd_tx, cmd_rx) = channel::<Command>();
         let s = Self { cmd_tx };
         let r = VoteChainRunner {
@@ -190,7 +190,7 @@ impl Application for VoteChain {
 }
 
 pub struct VoteChainRunner {
-    connection: SqlitePool,
+    connection: SqliteConnection,
     cmd_rx: Receiver<Command>,
     check_cache: HashMap<String, Result<String, String>>,
     dnfs: HashSet<String>,
