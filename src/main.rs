@@ -89,10 +89,10 @@ pub async fn main() {
 
     let config = Config::figment();
     let context = init_context(&config).await.expect("Failed to initialize context");
-    let connection = &context.pool;
-    create_schema(&connection).await.expect("Failed to create schema");
+    let mut connection = context.pool.acquire().await.expect("Failed to acquire connection");
+    create_schema(&mut connection).await.expect("Failed to create schema");
 
-    let (app, runner) = VoteChain::new(connection.clone());
+    let (app, runner) = VoteChain::new(connection.detach());
     let server = ServerBuilder::new(1_000_000)
         .bind(format!("{}:{}", "127.0.0.1", context.comet_bft), app)
         .unwrap();
