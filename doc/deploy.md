@@ -1,5 +1,11 @@
 # Building
 
+Ubuntu Pre-reqs
+
+```
+sudo apt install build-essential libssl-dev pkg-config
+```
+
 Build with Cargo.
 
 ```
