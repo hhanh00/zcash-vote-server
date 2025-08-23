@@ -1,5 +1,6 @@
 use anyhow::Error;
 use base64::{prelude::BASE64_STANDARD, Engine as _};
+use bincode::Options;
 use orchard::vote::Ballot;
 use rocket::{http::Status, response::status::Custom, serde::json::Json, State};
 use serde::{Deserialize, Serialize};
@@ -64,7 +65,9 @@ pub async fn post_ballot(
             id,
             ballot: ballot.into_inner(),
         };
-        let tx_bytes = bincode::serialize(&tx).unwrap();
+        let tx_bytes = bincode::options()
+            .with_little_endian()
+            .serialize(&tx).unwrap();
 
         let rpc_port = comet_bft - 1;
         let tx_data = BASE64_STANDARD.encode(&tx_bytes);

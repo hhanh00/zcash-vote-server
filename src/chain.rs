@@ -1,4 +1,5 @@
 use anyhow::Result;
+use bincode::Options;
 use blake2b_simd::Params;
 use rusqlite::{params, OptionalExtension};
 use std::{
@@ -84,7 +85,9 @@ impl Application for VoteChain {
             request.r#type
         );
 
-        let Tx { id, ballot } = bincode::deserialize(&request.tx).unwrap();
+        let Tx { id, ballot } = bincode::options()
+            .with_little_endian()
+            .deserialize(&request.tx).unwrap();
         let (tx_result, rx_result) = channel();
         self.cmd_tx
             .send(Command::CheckBallot(id, ballot, tx_result))
@@ -116,7 +119,9 @@ impl Application for VoteChain {
     fn prepare_proposal(&self, request: RequestPrepareProposal) -> ResponsePrepareProposal {
         let mut filtered_txs = vec![];
         for tx in request.txs.into_iter() {
-            let Tx { id, ballot } = bincode::deserialize(&tx).unwrap();
+            let Tx { id, ballot } = bincode::options()
+                .with_little_endian()
+                .deserialize(&tx).unwrap();
             let sighash = hex::encode(&ballot.data.sighash().unwrap());
             let (tx_result, rx_result) = channel();
             self.cmd_tx
@@ -138,7 +143,9 @@ impl Application for VoteChain {
     fn finalize_block(&self, request: RequestFinalizeBlock) -> ResponseFinalizeBlock {
         let mut tx_results = vec![];
         for tx in request.txs.iter() {
-            let Tx { id, ballot } = bincode::deserialize(&tx).unwrap();
+            let Tx { id, ballot } = bincode::options()
+                .with_little_endian()
+                .deserialize(&tx).unwrap();
             let (tx_result, rx_result) = channel();
             self.cmd_tx
                 .send(Command::FinalizeBallot(id, ballot, tx_result))
