@@ -22,7 +22,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build
-      run: cargo build -r
+      run: |
+        apt update
+        apt install musl musl-dev musl-tools
+        rustup target add ${{ matrix.arch }}-unknown-linux-musl
+        cargo build --release --target ${{ matrix.arch }}-unknown-linux-musl
     - name: Staging
       run: |
         mkdir zcash-vote-server
