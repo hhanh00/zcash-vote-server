@@ -23,7 +23,7 @@ tendermint-proto = "0.40.1"
 blake2b_simd = "1.0.2"
 base64 = "0.22"
 reqwest = {version = "0.12", features = ["json"]}
-
+openssl = {version = "0.9", features = ["vendored"]}
 zcash-vote = {git = "https://github.com/hhanh00/zcash-vote.git", rev="8b42736"}
 orchard = "0.3.0"
 
