@@ -24,13 +24,13 @@ jobs:
     - name: Build
       run: |
         sudo apt update
-        sudo apt install musl musl-dev musl-tools libssl-dev pkg-config
+        sudo apt install musl musl-dev musl-tools
         rustup target add ${{ matrix.arch }}-unknown-linux-musl
         cargo build --release --target ${{ matrix.arch }}-unknown-linux-musl
     - name: Staging
       run: |
         mkdir zcash-vote-server
-        cp target/release/zcash-vote-server zcash-vote-server
+        cp target/${{ matrix.arch }}-unknown-linux-musl/release/zcash-vote-server zcash-vote-server
         cp Rocket.toml zcash-vote-server
         mkdir zcash-vote-server/data
         tar cvzf zcash-vote-server-${{ matrix.arch }}.tgz zcash-vote-server
