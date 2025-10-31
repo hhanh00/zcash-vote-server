@@ -33,7 +33,7 @@ pub fn create_schema(connection: &Connection) -> Result<()> {
 
     if load_prop(connection, "state")?.is_none() {
         let hash = Params::new().hash_length(32).personal(b"Zcash_Vote_CmBFT").to_state().finalize();
-        let hash = hex::encode(&hash.as_bytes());
+        let hash = hex::encode(hash.as_bytes());
 
         let initial_state= AppState {
             height: 0,
