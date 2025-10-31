@@ -117,7 +117,7 @@ impl Application for VoteChain {
         let mut filtered_txs = vec![];
         for tx in request.txs.into_iter() {
             let Tx { id, ballot } = bincode::deserialize(&tx).unwrap();
-            let sighash = hex::encode(&ballot.data.sighash().unwrap());
+            let sighash = hex::encode(ballot.data.sighash().unwrap());
             let (tx_result, rx_result) = channel();
             self.cmd_tx
                 .send(Command::PrepareProposal(id, ballot, tx_result))
@@ -138,7 +138,7 @@ impl Application for VoteChain {
     fn finalize_block(&self, request: RequestFinalizeBlock) -> ResponseFinalizeBlock {
         let mut tx_results = vec![];
         for tx in request.txs.iter() {
-            let Tx { id, ballot } = bincode::deserialize(&tx).unwrap();
+            let Tx { id, ballot } = bincode::deserialize(tx).unwrap();
             let (tx_result, rx_result) = channel();
             self.cmd_tx
                 .send(Command::FinalizeBallot(id, ballot, tx_result))
@@ -183,7 +183,8 @@ impl Application for VoteChain {
             .map_err(anyhow::Error::msg)
             .unwrap();
         let app_state = rx_result.recv().unwrap();
-        ResponseCommit {
+        // TODO: Review
+        let _ = ResponseCommit {
             retain_height: (app_state.height - 1) as i64,
         };
 
@@ -201,8 +202,7 @@ pub struct VoteChainRunner {
 impl VoteChainRunner {
     fn get_state(connection: &PooledConnection<SqliteConnectionManager>) -> AppState {
         let s = load_prop(connection, "state").unwrap().unwrap();
-        let app_state = serde_json::from_str::<AppState>(&s).unwrap();
-        app_state
+        serde_json::from_str::<AppState>(&s).unwrap()
     }
 
     fn process_command(&mut self, cmd: &Command) -> Result<()> {
@@ -220,7 +220,7 @@ impl VoteChainRunner {
                         let res = || {
                             let connection = &self.connection;
                             let (id_election, election, closed) =
-                                get_election(connection, &id).map_err(|e| e.to_string())?;
+                                get_election(connection, id).map_err(|e| e.to_string())?;
                             if closed {
                                 return Err("Election is closed".to_string());
                             }
@@ -287,7 +287,7 @@ impl VoteChainRunner {
                     let _ = connection.execute("ROLLBACK", []); // Ignore error
                     connection.execute("BEGIN TRANSACTION", [])?;
 
-                    let (id_election, _, closed) = get_election(connection, &id)?;
+                    let (id_election, _, closed) = get_election(connection, id)?;
                     if closed {
                         anyhow::bail!("Election is closed");
                     }
@@ -332,7 +332,7 @@ impl VoteChainRunner {
 
                     let height = crate::db::get_num_ballots(connection, id_election)?;
                     tracing::info!("ballot height: {height}");
-                    store_ballot(connection, id_election, height + 1, &ballot, &cmx_root)?;
+                    store_ballot(connection, id_election, height + 1, ballot, &cmx_root)?;
                     let sighash = hex::encode(data.sighash()?);
                     tracing::info!("election: {id_election} sighash: {sighash}");
 
