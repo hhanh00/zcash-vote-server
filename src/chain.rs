@@ -344,7 +344,8 @@ impl VoteChainRunner {
                             FROM cmx_roots
                             GROUP BY election
                         ) t2
-                        ON t1.election = t2.election AND t1.height = t2.max_height",
+                        ON t1.election = t2.election AND t1.height = t2.max_height
+                        ORDER BY t1.election",
                     )?;
                     let rows = s.query_map([], |r| {
                         Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, u32>(1)?))
