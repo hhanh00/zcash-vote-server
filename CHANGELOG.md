@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.4](https://github.com/hhanh00/zcash-vote-server/compare/v1.0.3...v1.0.4) (2025-10-31)
+
+
+### Bug Fixes
+
+* app_state must be deterministic ([#49](https://github.com/hhanh00/zcash-vote-server/issues/49)) ([64d24aa](https://github.com/hhanh00/zcash-vote-server/commit/64d24aa58f9f23bac8a9335670fb91e78ed5a934))
+
 ## [1.0.3](https://github.com/hhanh00/zcash-vote-server/compare/v1.0.2...v1.0.3) (2025-10-30)
 
 
