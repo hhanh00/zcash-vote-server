@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/hhanh00/zcash-vote-server/compare/v1.0.4...v1.1.0) (2025-11-01)
+
+
+### Features
+
+* add -q quit command flag ([#53](https://github.com/hhanh00/zcash-vote-server/issues/53)) ([a4077f0](https://github.com/hhanh00/zcash-vote-server/commit/a4077f08fd37861e77291a1759af5d1940099ec6))
+
 ## [1.0.4](https://github.com/hhanh00/zcash-vote-server/compare/v1.0.3...v1.0.4) (2025-10-31)
 
 
