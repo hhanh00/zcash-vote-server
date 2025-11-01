@@ -970,6 +970,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "getopt"
+version = "1.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66eb69f29cb9773ca399122b247020f929dde18de809a27b0250be02bbf9fa5e"
+
+[[package]]
 name = "getrandom"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4020,6 +4026,7 @@ dependencies = [
  "base64 0.22.1",
  "bincode",
  "blake2b_simd",
+ "getopt",
  "hex",
  "lazy_static",
  "openssl-sys",
