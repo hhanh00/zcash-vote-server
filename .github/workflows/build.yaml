@@ -20,13 +20,13 @@ jobs:
             arch: x86_64
           - os: ubuntu-24.04-arm
             arch: aarch64
+    container:
+      image: clux/muslrust:stable
     steps:
     - uses: actions/checkout@v4
     - name: Build
       run: |
-        sudo apt update
-        sudo apt install musl musl-dev musl-tools libssl-dev
-        rustup target add ${{ matrix.arch }}-unknown-linux-musl
+        apk add --no-cache openssl-dev
         cargo build --release --target ${{ matrix.arch }}-unknown-linux-musl
     - name: Staging
       run: |
