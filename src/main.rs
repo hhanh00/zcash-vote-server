@@ -1,8 +1,7 @@
 use anyhow::{Error, Result};
 use getopt::Opt;
-use rocket::{figment::Figment, routes, Build, Config, Rocket, State};
+use rocket::{figment::Figment, routes, tokio::runtime::Builder, Build, Config, Rocket, State};
 use rocket_cors::CorsOptions;
-use rusqlite::params;
 use tendermint_abci::ServerBuilder;
 use zcash_vote_server::{
     chain::VoteChain,
@@ -13,43 +12,45 @@ use zcash_vote_server::{
 };
 
 #[rocket::get("/")]
-fn index(context: &State<Context>) -> Result<String, String> {
-    let r = || {
-        let connection = context.pool.get()?;
-        let n = connection.query_row("SELECT COUNT(*) FROM t", [], |r| r.get::<_, u32>(0))?;
-        Ok::<_, Error>(n.to_string())
-    };
-    r().map_err(|e| e.to_string())
+fn index(_context: &State<Context>) -> Result<String, String> {
+    Ok("OK".to_string())
 }
 
-pub fn init_context(config: &Figment) -> Result<Context> {
+pub async fn init_context(config: &Figment) -> Result<Context> {
     let data_path: String = config.extract_inner("custom.data_path")?;
     let db_path: String = config.extract_inner("custom.db_path")?;
     let cometbft_port: u16 = config.extract_inner("custom.cometbft_port")?;
-    let context = Context::new(data_path, db_path, cometbft_port);
+    let context = Context::new(data_path, db_path, cometbft_port).await;
     Ok(context)
 }
 
 pub async fn init(context: &mut Context) -> Result<()> {
     let elections = scan_data_dir(&context.data_path)?;
     tracing::info!("# elections = {}", elections.len());
-    let connection = context.pool.get()?;
-    connection.execute("UPDATE elections SET closed = TRUE", [])?;
+    let mut connection = context.pool.acquire().await?;
+    sqlx::query("UPDATE elections SET closed = TRUE")
+        .execute(&mut *connection)
+        .await?;
     for e in elections.iter() {
-        let connection = context.pool.get()?;
-        let id_election = store_election(&connection, e, false)?;
+        let id_election = store_election(&mut connection, e, false).await?;
         let cmx_root = e.cmx_frontier.as_ref().unwrap().root();
         let frontier = serde_json::to_string(&e.cmx_frontier)?;
-        connection.execute(
+        sqlx::query(
             "INSERT INTO cmx_frontiers(election, height, frontier)
             VALUES (?1, 0, ?2) ON CONFLICT DO NOTHING",
-            params![id_election, &frontier],
-        )?;
-        connection.execute(
+        )
+        .bind(id_election)
+        .bind(&frontier)
+        .execute(&mut *connection)
+        .await?;
+        sqlx::query(
             "INSERT INTO cmx_roots(election, height, hash)
             VALUES (?1, 0, ?2) ON CONFLICT DO NOTHING",
-            params![id_election, &cmx_root],
-        )?;
+        )
+        .bind(id_election)
+        .bind(&cmx_root[..])
+        .execute(&mut *connection)
+        .await?;
     }
     Ok::<_, Error>(())
 }
@@ -92,22 +93,28 @@ pub async fn main() {
     }
 
     let config = Config::figment();
-    let mut context = init_context(&config).unwrap();
+    let mut context = init_context(&config).await.unwrap();
+    let mut connection = context.pool.acquire().await.unwrap();
     {
-        let connection = context.pool.get().unwrap();
-        create_schema(&connection).unwrap();
+        create_schema(&mut connection).await.unwrap();
         init(&mut context).await.unwrap();
     }
 
-    if q_flag { return; }
+    if q_flag {
+        return;
+    }
 
-    let (app, runner) = VoteChain::new(context.pool.get().unwrap());
+    let pool = context.pool.clone();
+    let (app, runner) = VoteChain::new(pool).await;
     let server = ServerBuilder::new(1_000_000)
         .bind(format!("{}:{}", "127.0.0.1", context.comet_bft), app)
         .unwrap();
     std::thread::spawn(move || {
-        let res = runner.run();
-        println!("{:?}", res);
+        let r = Builder::new_current_thread().enable_all().build().unwrap();
+        r.block_on(async move {
+            let res = runner.run().await;
+            println!("{:?}", res);
+        })
     });
     std::thread::spawn(move || server.listen().unwrap());
 
