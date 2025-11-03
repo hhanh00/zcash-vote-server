@@ -280,7 +280,7 @@ impl VoteChainRunner {
             }
             Command::FinalizeBallot(id, ballot, result) => {
                 let res = async {
-                    sqlx::query("ROLLBACK").execute(&mut self.connection).await?;
+                    let _ = sqlx::query("ROLLBACK").execute(&mut self.connection).await;
                     sqlx::query("BEGIN TRANSACTION")
                         .execute(&mut self.connection)
                         .await?;
