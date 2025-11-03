@@ -28,10 +28,6 @@ jobs:
       run: |
         apt-get update && apt-get install -y libssl-dev pkg-config
         cargo build --release --target ${{ matrix.arch }}-unknown-linux-musl
-      env:
-        OPENSSL_DIR: /usr/include/openssl
-        OPENSSL_LIB_DIR: /usr/lib/x86_64-linux-gnu
-        OPENSSL_STATIC: 1
     - name: Staging
       run: |
         mkdir zcash-vote-server
