@@ -25,7 +25,7 @@ jobs:
     - name: Build
       run: |
         sudo apt update
-        sudo apt install musl musl-dev musl-tools
+        sudo apt install musl musl-dev musl-tools libssl-dev
         rustup target add ${{ matrix.arch }}-unknown-linux-musl
         cargo build --release --target ${{ matrix.arch }}-unknown-linux-musl
     - name: Staging
