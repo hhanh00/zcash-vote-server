@@ -26,7 +26,7 @@ jobs:
     - uses: actions/checkout@v4
     - name: Build
       run: |
-        apk add --no-cache openssl-dev
+        apt-get update && apt-get install -y libssl-dev pkg-config
         cargo build --release --target ${{ matrix.arch }}-unknown-linux-musl
     - name: Staging
       run: |
