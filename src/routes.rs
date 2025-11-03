@@ -61,7 +61,7 @@ pub async fn post_ballot(
         let comet_bft = state.comet_bft;
         tracing::info!("Ballot received");
         let tx = Tx {
-            id,
+            id: id.to_string(),
             ballot: ballot.into_inner(),
         };
         let tx_bytes = bincode::serialize(&tx).unwrap();
