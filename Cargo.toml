@@ -24,7 +24,7 @@ blake2b_simd = "1.0.2"
 base64 = "0.22"
 reqwest = {version = "0.12", features = ["json"]}
 sqlx = {version = "0.8.6", features = ["runtime-tokio", "sqlite", "macros", "migrate"]}
-openssl = { version = "0.9", features = ["vendored"] }
+openssl-sys = { version = "0.9", features = ["vendored"] }
 #zcash-vote = {path = "../zcash-vote"}
 zcash-vote = {git = "https://github.com/hhanh00/zcash-vote.git", rev="7ade397f742dc86d399e340d7c86306ee2a6aab3"}
 orchard = "0.3.0"
