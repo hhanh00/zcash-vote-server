@@ -14,7 +14,7 @@ pub struct Tx {
 }
 
 #[rocket::get("/election/<id>")]
-pub async fn get_election_by_id(id: String, state: &State<Context>) -> Result<Json<Value>, String> {
+pub async fn get_election_by_id(id: &str, state: &State<Context>) -> Result<Json<Value>, String> {
     let res = async {
         let mut connection = state.pool.acquire().await?;
         let (_, election, _) = get_election(&mut connection, &id).await?;
@@ -26,7 +26,7 @@ pub async fn get_election_by_id(id: String, state: &State<Context>) -> Result<Js
 
 #[rocket::get("/election/<id>/ballot/height/<height>")]
 pub async fn get_ballot_height(
-    id: String,
+    id: &str,
     height: u32,
     state: &State<Context>,
 ) -> Result<Json<Value>, Custom<String>> {
@@ -41,7 +41,7 @@ pub async fn get_ballot_height(
 }
 
 #[rocket::get("/election/<id>/num_ballots")]
-pub async fn get_num_ballots(id: String, state: &State<Context>) -> Result<String, Custom<String>> {
+pub async fn get_num_ballots(id: &str, state: &State<Context>) -> Result<String, Custom<String>> {
     let res = async {
         let mut connection = state.pool.acquire().await?;
         let (id_election, _, _) = get_election(&mut connection, &id).await?;
@@ -53,7 +53,7 @@ pub async fn get_num_ballots(id: String, state: &State<Context>) -> Result<Strin
 
 #[rocket::post("/election/<id>/ballot", format = "json", data = "<ballot>")]
 pub async fn post_ballot(
-    id: String,
+    id: &str,
     ballot: Json<Ballot>,
     state: &State<Context>,
 ) -> Result<String, Custom<String>> {
