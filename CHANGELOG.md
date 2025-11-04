@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/hhanh00/zcash-vote-server/compare/v1.2.0...v1.2.1) (2025-11-04)
+
+
+### Bug Fixes
+
+* increase timeout ([#59](https://github.com/hhanh00/zcash-vote-server/issues/59)) ([3268b94](https://github.com/hhanh00/zcash-vote-server/commit/3268b940d5d46f7c26373223e92fb2c1b4d4be01))
+
 ## [1.2.0](https://github.com/hhanh00/zcash-vote-server/compare/v1.1.0...v1.2.0) (2025-11-03)
 
 
