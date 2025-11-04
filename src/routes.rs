@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::Error;
 use base64::{prelude::BASE64_STANDARD, Engine as _};
 use orchard::vote::Ballot;
@@ -77,6 +79,7 @@ pub async fn post_ballot(
         tracing::info!("Post to {}", url);
         let client = reqwest::Client::new();
         let rep = client.post(&url)
+            .timeout(Duration::from_secs(300))
             .json(&req_body).send().await?.error_for_status()?;
         let json_rep: Value = rep.json().await?;
         tracing::info!("post ballot rep: {:?}", json_rep);
