@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.0](https://github.com/hhanh00/zcash-vote-server/compare/v1.1.0...v1.2.0) (2025-11-03)
+
+
+### Features
+
+* async mode ([#55](https://github.com/hhanh00/zcash-vote-server/issues/55)) ([9342be0](https://github.com/hhanh00/zcash-vote-server/commit/9342be06e3483306eb7768ef6ef8b30d9d414256))
+
+
+### Bug Fixes
+
+* error when no transaction on going ([#58](https://github.com/hhanh00/zcash-vote-server/issues/58)) ([d2c023c](https://github.com/hhanh00/zcash-vote-server/commit/d2c023c83e6bd3e511f0a61c44485bb4b24b2305))
+* missing create_if_missing ([#57](https://github.com/hhanh00/zcash-vote-server/issues/57)) ([2178d43](https://github.com/hhanh00/zcash-vote-server/commit/2178d438de1188e879140cfe56a063240edcc0f1))
+
 ## [1.1.0](https://github.com/hhanh00/zcash-vote-server/compare/v1.0.4...v1.1.0) (2025-11-01)
 
 
