@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2](https://github.com/hhanh00/zcash-vote-server/compare/v1.2.1...v1.2.2) (2025-11-12)
+
+
+### Bug Fixes
+
+* **vote-server:** fix non determinism apphash crashes caused by sorting by the wrong ID in sql ([#61](https://github.com/hhanh00/zcash-vote-server/issues/61)) ([76374dd](https://github.com/hhanh00/zcash-vote-server/commit/76374dd62f93d71fc89c201554316f17a7a7a52a))
+
 ## [1.2.1](https://github.com/hhanh00/zcash-vote-server/compare/v1.2.0...v1.2.1) (2025-11-04)
 
 
