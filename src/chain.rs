@@ -342,7 +342,7 @@ impl VoteChainRunner {
                     tracing::info!("election: {id_election} sighash: {sighash}");
 
                     let hashes = sqlx::query(
-                        "SELECT t1.hash, t1.election
+                        "SELECT t1.hash
                         FROM cmx_roots t1
                         JOIN (
                             SELECT election, MAX(height) AS max_height
@@ -350,7 +350,8 @@ impl VoteChainRunner {
                             GROUP BY election
                         ) t2
                         ON t1.election = t2.election AND t1.height = t2.max_height
-                        ORDER BY t1.election"
+                        JOIN elections e ON t1.election = e.id_election
+                        ORDER BY e.id"
                     )
                     .map(|r: SqliteRow| {
                         let hash: Vec<u8> = r.get(0);
