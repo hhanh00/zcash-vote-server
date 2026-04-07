@@ -7,7 +7,7 @@ on:
     branches:
       - ci
     tags:
-      - "v*"
+      - "zcash-vote-server-v*"
 
 jobs:
   build:
